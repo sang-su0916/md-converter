@@ -1,0 +1,50 @@
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface-hover: #1a1a25;
+  --border: #2a2a35;
+  --text: #e4e4e8;
+  --text-muted: #8888a0;
+  --accent: #6c63ff;
+  --accent-hover: #7b73ff;
+  --accent-glow: rgba(108, 99, 255, 0.15);
+  --success: #22c55e;
+  --error: #ef4444;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Markdown Preview Styles */
+.md-preview {
+  line-height: 1.8;
+  font-size: 15px;
+}
+.md-preview h1 { font-size: 1.8em; font-weight: 800; margin: 1.2em 0 0.6em; color: #fff; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.md-preview h2 { font-size: 1.4em; font-weight: 700; margin: 1em 0 0.5em; color: #fff; }
+.md-preview h3 { font-size: 1.2em; font-weight: 700; margin: 0.8em 0 0.4em; color: #e0e0e8; }
+.md-preview p { margin: 0.6em 0; }
+.md-preview ul, .md-preview ol { padding-left: 1.5em; margin: 0.5em 0; }
+.md-preview li { margin: 0.3em 0; }
+.md-preview code { background: rgba(108,99,255,0.15); color: #b4b0ff; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; font-family: 'SF Mono', monospace; }
+.md-preview pre { background: #0d0d15; border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 0.8em 0; }
+.md-preview pre code { background: none; padding: 0; color: var(--text); }
+.md-preview blockquote { border-left: 3px solid var(--accent); padding-left: 16px; color: var(--text-muted); margin: 0.8em 0; }
+.md-preview table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
+.md-preview th, .md-preview td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.md-preview th { background: var(--surface); font-weight: 700; }
+.md-preview a { color: var(--accent); text-decoration: none; }
+.md-preview a:hover { text-decoration: underline; }
+.md-preview hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.md-preview img { max-width: 100%; border-radius: 8px; }
+.md-preview strong { color: #fff; }
