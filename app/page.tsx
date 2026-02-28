@@ -135,16 +135,16 @@ export default function Home() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <img
-            src="/logo-sm.png"
+            src="/logo.png"
             alt="엘비즈파트너스"
-            style={{ height: 38, width: 'auto', borderRadius: 6 }}
+            style={{ height: 56, width: 'auto', borderRadius: 8, filter: 'drop-shadow(0 2px 8px rgba(201,168,76,0.3))' }}
           />
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px' }}>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px' }}>
               MD Converter
             </h1>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
-              파일을 마크다운으로 · <span style={{ color: '#C9A84C' }}>엘비즈파트너스</span>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+              파일을 마크다운으로 · <span style={{ color: '#C9A84C', fontWeight: 700 }}>엘비즈파트너스</span>
             </p>
           </div>
         </div>
@@ -167,6 +167,36 @@ export default function Home() {
       </header>
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '28px 32px', gap: 20, maxWidth: 1200, width: '100%', margin: '0 auto' }}>
+        {/* Brand Hero */}
+        {!result && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(201,168,76,0.08) 0%, rgba(108,99,255,0.06) 50%, rgba(201,168,76,0.04) 100%)',
+            borderRadius: 16,
+            padding: '32px 28px',
+            textAlign: 'center',
+            border: '1px solid rgba(201,168,76,0.15)',
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+              background: 'linear-gradient(90deg, #C9A84C, #6c63ff, #C9A84C)',
+            }} />
+            <img
+              src="/logo.png"
+              alt="엘비즈파트너스"
+              style={{ height: 72, width: 'auto', marginBottom: 14, filter: 'drop-shadow(0 4px 12px rgba(201,168,76,0.25))' }}
+            />
+            <h2 style={{ fontSize: 26, fontWeight: 800, color: '#fff', marginBottom: 6 }}>
+              문서를 <span style={{ color: '#C9A84C' }}>마크다운</span>으로, 한 번에
+            </h2>
+            <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 520, margin: '0 auto' }}>
+              PDF · DOCX · HWP · PPTX 등 <strong style={{ color: '#a855f7' }}>20종+</strong> 문서를 마크다운으로 변환하세요.
+              <br />옵시디언 · 노션 · GitHub에 바로 사용할 수 있습니다.
+            </p>
+          </div>
+        )}
+
         {/* Upload Area */}
         {!result && (
           <div
@@ -524,36 +554,47 @@ export default function Home() {
 
       {/* Footer with Branding */}
       <footer style={{
-        padding: '18px 32px',
+        padding: '24px 32px 20px',
         borderTop: '1px solid var(--border)',
-        background: 'var(--surface)',
+        background: 'linear-gradient(180deg, var(--surface) 0%, rgba(201,168,76,0.03) 100%)',
       }}>
         <div style={{
           maxWidth: 1200, margin: '0 auto',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          flexWrap: 'wrap', gap: 12,
+          flexWrap: 'wrap', gap: 16,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <img src="/logo-sm.png" alt="엘비즈파트너스" style={{ height: 24, width: 'auto', opacity: 0.8 }} />
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              <span style={{ color: '#C9A84C', fontWeight: 600 }}>엘비즈파트너스</span>
-              <span style={{ margin: '0 6px', opacity: 0.4 }}>|</span>
-              세무·노무·법무 컨설팅 & AI 활용 교육
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <img src="/logo.png" alt="엘비즈파트너스" style={{ height: 40, width: 'auto', filter: 'drop-shadow(0 2px 6px rgba(201,168,76,0.2))' }} />
+            <div style={{ lineHeight: 1.6 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>
+                <span style={{ color: '#C9A84C' }}>엘비즈파트너스</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                세무·노무·법무 컨설팅 & AI 활용 교육
+              </div>
             </div>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 16, alignItems: 'center' }}>
-            <a href="tel:010-3709-5785" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
-              📞 010-3709-5785
-            </a>
-            <a href="mailto:sangsu0916@naver.com" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
-              ✉️ sangsu0916@naver.com
-            </a>
-            <a href="https://lbiz-partners.com" target="_blank" rel="noopener noreferrer" style={{ color: '#C9A84C', textDecoration: 'none', fontWeight: 600 }}>
-              lbiz-partners.com
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', gap: 16, alignItems: 'center' }}>
+              <a href="tel:010-3709-5785" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+                📞 010-3709-5785
+              </a>
+              <a href="mailto:sangsu0916@naver.com" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+                ✉️ sangsu0916@naver.com
+              </a>
+            </div>
+            <a href="https://lbiz-partners.com" target="_blank" rel="noopener noreferrer" style={{
+              color: '#C9A84C', textDecoration: 'none', fontWeight: 700, fontSize: 13,
+              padding: '6px 16px', borderRadius: 8,
+              border: '1px solid rgba(201,168,76,0.3)',
+              background: 'rgba(201,168,76,0.08)',
+              transition: 'all 0.2s',
+            }}>
+              🌐 lbiz-partners.com →
             </a>
           </div>
         </div>
-        <div style={{ maxWidth: 1200, margin: '8px auto 0', fontSize: 10, color: 'rgba(136,136,160,0.5)', textAlign: 'center' }}>
+        <div style={{ maxWidth: 1200, margin: '14px auto 0', fontSize: 10, color: 'rgba(136,136,160,0.4)', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 12 }}>
           © 2026 엘비즈파트너스. Powered by MarkItDown (Microsoft) · Built with Next.js
         </div>
       </footer>
