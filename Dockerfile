@@ -7,6 +7,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+ENV DOCKER_BUILD=true
 RUN npm run build
 
 # === Stage 2: Production ===

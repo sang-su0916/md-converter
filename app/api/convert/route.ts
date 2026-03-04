@@ -8,6 +8,9 @@ import { randomUUID } from 'crypto';
 
 const execFileAsync = promisify(execFile);
 
+// If RENDER_API_URL is set, proxy to Render backend (Vercel mode)
+const RENDER_API_URL = process.env.RENDER_API_URL;
+
 const SUPPORTED_EXTENSIONS = [
   '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls',
   '.html', '.htm', '.csv', '.json', '.xml', '.rtf', '.epub',
@@ -23,7 +26,6 @@ const TEXT_EXTENSIONS = ['.txt', '.md', '.rst', '.log'];
 const PDF_EXTENSIONS = ['.pdf'];
 const OFFICE_EXTENSIONS = ['.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.rtf', '.epub'];
 const HTML_EXTENSIONS = ['.html', '.htm', '.xml'];
-const DATA_EXTENSIONS = ['.csv', '.json'];
 
 function getExtension(filename: string): string {
   const idx = filename.lastIndexOf('.');
@@ -41,7 +43,6 @@ let markitdownAvailable: boolean | null = null;
 
 async function checkMarkitdown(): Promise<string | null> {
   if (markitdownAvailable === false) return null;
-
   const candidates = [
     join(HOME, '.local', 'bin', 'markitdown'),
     '/opt/homebrew/bin/markitdown',
@@ -59,9 +60,6 @@ async function checkMarkitdown(): Promise<string | null> {
   return null;
 }
 
-/**
- * Node.js fallback: convert PDF to text using unpdf (works in serverless)
- */
 async function convertPdfToMarkdown(filePath: string): Promise<string> {
   const { extractText, getDocumentProxy } = await import('unpdf');
   const buffer = await readFile(filePath);
@@ -70,182 +68,156 @@ async function convertPdfToMarkdown(filePath: string): Promise<string> {
   return text || '';
 }
 
-/**
- * Node.js fallback: convert office files (DOCX, PPTX, XLSX, etc.) to markdown
- * Uses officeparser v6 structured content API
- */
 async function convertWithOfficeParser(filePath: string): Promise<string> {
   const officeparser = await import('officeparser');
   const result = await officeparser.parseOffice(filePath);
-
-  // officeparser v6 returns { type, metadata, content, toText }
   if (result && typeof result === 'object' && 'content' in result) {
     return contentToMarkdown(result.content as ContentNode[], result.type as string);
   }
-  // Fallback for older versions or unexpected format
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const res = result as any;
-  if (res && typeof res.toText === 'function') {
-    return res.toText();
-  }
+  if (res && typeof res.toText === 'function') return res.toText();
   return typeof result === 'string' ? result : String(result);
 }
 
-interface ContentNode {
-  type: string;
-  text?: string;
-  children?: ContentNode[];
-  metadata?: Record<string, unknown>;
-}
+interface ContentNode { type: string; text?: string; children?: ContentNode[]; metadata?: Record<string, unknown>; }
 
 function contentToMarkdown(content: ContentNode[], docType?: string): string {
   const lines: string[] = [];
-
   for (const node of content) {
     switch (node.type) {
-      case 'heading': {
-        const level = (node.metadata?.level as number) || 1;
-        lines.push(`${'#'.repeat(level)} ${node.text || ''}`);
-        lines.push('');
-        break;
-      }
-      case 'paragraph': {
-        const text = node.text || '';
-        if (text.trim()) {
-          lines.push(text);
-          lines.push('');
-        }
-        break;
-      }
+      case 'heading': { const level = (node.metadata?.level as number) || 1; lines.push(`${'#'.repeat(level)} ${node.text || ''}`); lines.push(''); break; }
+      case 'paragraph': { const text = node.text || ''; if (text.trim()) { lines.push(text); lines.push(''); } break; }
       case 'table': {
         const tableRows = node.children || [];
         if (tableRows.length === 0) break;
-
         for (let i = 0; i < tableRows.length; i++) {
           const row = tableRows[i];
           const cells = (row.children || []).map(c => (c.text || '').replace(/\|/g, '\\|').replace(/\n/g, ' '));
           lines.push(`| ${cells.join(' | ')} |`);
-          if (i === 0) {
-            lines.push(`| ${cells.map(() => '---').join(' | ')} |`);
-          }
+          if (i === 0) lines.push(`| ${cells.map(() => '---').join(' | ')} |`);
         }
-        lines.push('');
-        break;
+        lines.push(''); break;
       }
-      case 'list': {
-        const items = node.children || [];
-        for (const item of items) {
-          lines.push(`- ${item.text || ''}`);
-        }
-        lines.push('');
-        break;
-      }
+      case 'list': { const items = node.children || []; for (const item of items) lines.push(`- ${item.text || ''}`); lines.push(''); break; }
       case 'sheet': {
-        // XLSX sheet
         const sheetName = (node.metadata?.name as string) || '';
-        if (sheetName) {
-          lines.push(`## ${sheetName}`);
-        }
+        if (sheetName) lines.push(`## ${sheetName}`);
         const rows = node.children || [];
         if (rows.length > 0) {
           for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             const cells = (row.children || []).map(c => (c.text || '').replace(/\|/g, '\\|'));
             lines.push(`| ${cells.join(' | ')} |`);
-            if (i === 0) {
-              lines.push(`| ${cells.map(() => '---').join(' | ')} |`);
-            }
+            if (i === 0) lines.push(`| ${cells.map(() => '---').join(' | ')} |`);
           }
           lines.push('');
         }
         break;
       }
-      case 'slide': {
-        const slideNum = (node.metadata?.number as number) || '';
-        lines.push(`## 슬라이드 ${slideNum}`);
-        if (node.children) {
-          lines.push(contentToMarkdown(node.children, docType));
-        }
-        break;
-      }
+      case 'slide': { const slideNum = (node.metadata?.number as number) || ''; lines.push(`## 슬라이드 ${slideNum}`); if (node.children) lines.push(contentToMarkdown(node.children, docType)); break; }
       default: {
-        // Generic text extraction
-        if (node.text?.trim()) {
-          lines.push(node.text);
-          lines.push('');
-        } else if (node.children) {
-          lines.push(contentToMarkdown(node.children, docType));
-        }
+        if (node.text?.trim()) { lines.push(node.text); lines.push(''); }
+        else if (node.children) lines.push(contentToMarkdown(node.children, docType));
       }
     }
   }
-
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
 }
 
-/**
- * Node.js fallback: convert HTML to Markdown
- */
 async function convertHtmlToMarkdown(htmlContent: string): Promise<string> {
   const TurndownService = (await import('turndown')).default;
-  const turndown = new TurndownService({
-    headingStyle: 'atx',
-    codeBlockStyle: 'fenced',
-    bulletListMarker: '-',
-  });
+  const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
   return turndown.turndown(htmlContent);
 }
 
-/**
- * Node.js fallback: convert CSV to Markdown table
- */
 function convertCsvToMarkdown(csvContent: string): string {
   const lines = csvContent.trim().split('\n');
   if (lines.length === 0) return csvContent;
-
   const rows = lines.map(line => {
-    const cells: string[] = [];
-    let current = '';
-    let inQuotes = false;
+    const cells: string[] = []; let current = ''; let inQuotes = false;
     for (const ch of line) {
-      if (ch === '"') { inQuotes = !inQuotes; }
+      if (ch === '"') inQuotes = !inQuotes;
       else if (ch === ',' && !inQuotes) { cells.push(current.trim()); current = ''; }
-      else { current += ch; }
+      else current += ch;
     }
-    cells.push(current.trim());
-    return cells;
+    cells.push(current.trim()); return cells;
   });
-
   if (rows.length === 0) return csvContent;
-
   const header = `| ${rows[0].join(' | ')} |`;
   const separator = `| ${rows[0].map(() => '---').join(' | ')} |`;
   const body = rows.slice(1).map(r => `| ${r.join(' | ')} |`).join('\n');
-
   return [header, separator, body].join('\n') + '\n';
 }
 
+function postProcessHwpMarkdown(md: string): string {
+  let result = md.replace(/^-\s*\d+\s*-\s*$/gm, '').replace(/^#{1,6}\s*$/gm, '').replace(/\n{4,}/g, '\n\n\n').replace(/\[autonumbering[^\]]*\]/g, '').replace(/[ \t]+$/gm, '');
+  const lines = result.split('\n'); const processed: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) { processed.push(''); continue; }
+    if (/^제\d+장\s+/.test(trimmed) && !trimmed.includes('|') && trimmed.length < 30) { processed.push(`## ${trimmed}`); continue; }
+    if (/^제\d+조[\s(（]/.test(trimmed) && !trimmed.includes('|') && trimmed.length < 30) { processed.push(`### ${trimmed}`); continue; }
+    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed) && !trimmed.includes('|')) { processed.push(`# ${trimmed}`); continue; }
+    processed.push(line);
+  }
+  return processed.join('\n').trim() + '\n';
+}
+
+function formatHwpTextToMarkdown(text: string): string {
+  const lines = text.split('\n'); const result: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) { result.push(''); continue; }
+    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed)) result.push(`# ${trimmed}`);
+    else if (/^제\s*\d+\s*장/.test(trimmed)) result.push(`## ${trimmed}`);
+    else if (/^제\s*\d+\s*조/.test(trimmed)) result.push(`### ${trimmed}`);
+    else if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) result.push(`- ${trimmed}`);
+    else if (/^[○●■□▶▷◆◇]/.test(trimmed)) result.push(`- ${trimmed}`);
+    else if (/^[가나다라마바사아자차카타파하][\.\)]\s/.test(trimmed)) result.push(`  - ${trimmed}`);
+    else if (/^\d+[\.\)]\s/.test(trimmed)) result.push(`${trimmed}`);
+    else result.push(trimmed);
+  }
+  return result.join('\n');
+}
+
 export async function POST(request: NextRequest) {
+  // === PROXY MODE (Vercel → Render) ===
+  if (RENDER_API_URL) {
+    try {
+      const formData = await request.formData();
+      const file = formData.get('file') as File | null;
+      if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 });
+
+      const renderFormData = new FormData();
+      renderFormData.append('file', file);
+
+      const res = await fetch(`${RENDER_API_URL}/api/convert`, {
+        method: 'POST',
+        body: renderFormData,
+      });
+      const data = await res.json();
+      return NextResponse.json(data, { status: res.status });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return NextResponse.json({ error: `서버 연결 오류: ${message}` }, { status: 502 });
+    }
+  }
+
+  // === DIRECT MODE (Render / Mac mini) ===
   let tempPath = '';
   let tempHtmlPath = '';
 
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-
-    if (!file) {
-      return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 });
 
     const ext = getExtension(file.name);
     if (!SUPPORTED_EXTENSIONS.includes(ext)) {
-      return NextResponse.json(
-        { error: `지원하지 않는 파일 형식입니다: ${ext}\n지원 형식: PDF, DOCX, PPTX, XLSX, HTML, HWP, 이미지, 오디오 등` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `지원하지 않는 파일 형식입니다: ${ext}` }, { status: 400 });
     }
 
-    // Save uploaded file to temp directory
     const tempDir = join(tmpdir(), 'md-converter');
     await mkdir(tempDir, { recursive: true });
     const tempId = randomUUID();
@@ -253,85 +225,39 @@ export async function POST(request: NextRequest) {
 
     const bytes = await file.arrayBuffer();
     await writeFile(tempPath, Buffer.from(bytes));
-
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
 
-    // === Plain text files: read directly ===
     if (TEXT_EXTENSIONS.includes(ext)) {
       const textContent = await readFile(tempPath, 'utf-8');
-      return NextResponse.json({
-        markdown: textContent,
-        filename: file.name.replace(/\.[^.]+$/, '.md'),
-        originalName: file.name,
-        fileSize: `${fileSizeMB} MB`,
-        lineCount: textContent.split('\n').length,
-        charCount: textContent.length,
-      });
+      return NextResponse.json({ markdown: textContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: textContent.split('\n').length, charCount: textContent.length });
     }
 
-    // === HWP: needs hwp5html/hwp5txt (Python tools) ===
     if (HWP_EXTENSIONS.includes(ext)) {
       const hwp5htmlBin = join(HOME, '.local', 'bin', 'hwp5html');
       const hwp5txtBin = join(HOME, '.local', 'bin', 'hwp5txt');
       tempHtmlPath = join(tempDir, `${tempId}.html`);
-
-      // Check if hwp5html exists
       let hwpToolAvailable = false;
-      try {
-        await execFileAsync('test', ['-f', hwp5htmlBin]);
-        hwpToolAvailable = true;
-      } catch { /* not available */ }
-
+      try { await execFileAsync('test', ['-f', hwp5htmlBin]); hwpToolAvailable = true; } catch { /* */ }
       if (!hwpToolAvailable) {
-        // Not available (e.g., Vercel) → return friendly error
-        return NextResponse.json({
-          error: `HWP 파일은 로컬 서버에서만 변환 가능합니다.\n\n로컬 주소: http://100.64.56.84:3100\n\nVercel 환경에서는 PDF, DOCX, PPTX, XLSX, HTML, CSV, TXT를 지원합니다.`,
-        }, { status: 400 });
+        return NextResponse.json({ error: `HWP 파일은 Render 서버에서만 변환 가능합니다.\n\nRender: https://md-converter-ghdf.onrender.com` }, { status: 400 });
       }
-
       try {
-        // Step 1: HWP → HTML via hwp5html
-        await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], {
-          timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV,
-        });
-
-        // Step 2: HTML → Markdown (markitdown or turndown)
+        await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
         const markitdownBin = await checkMarkitdown();
         let markdown: string;
-
         if (markitdownBin) {
-          const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], {
-            timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV,
-          });
+          const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
           markdown = postProcessHwpMarkdown(stdout);
         } else {
           const htmlContent = await readFile(tempHtmlPath, 'utf-8');
           markdown = postProcessHwpMarkdown(await convertHtmlToMarkdown(htmlContent));
         }
-
-        return NextResponse.json({
-          markdown,
-          filename: file.name.replace(/\.[^.]+$/, '.md'),
-          originalName: file.name,
-          fileSize: `${fileSizeMB} MB`,
-          lineCount: markdown.split('\n').length,
-          charCount: markdown.length,
-        });
+        return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
       } catch (hwpError: unknown) {
-        // Fallback: hwp5txt
         try {
-          const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], {
-            timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV,
-          });
+          const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
           const markdown = formatHwpTextToMarkdown(hwpText);
-          return NextResponse.json({
-            markdown,
-            filename: file.name.replace(/\.[^.]+$/, '.md'),
-            originalName: file.name,
-            fileSize: `${fileSizeMB} MB`,
-            lineCount: markdown.split('\n').length,
-            charCount: markdown.length,
-          });
+          return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
         } catch {
           const msg = hwpError instanceof Error ? hwpError.message : 'Unknown error';
           return NextResponse.json({ error: `HWP 변환 오류: ${msg}` }, { status: 500 });
@@ -339,148 +265,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // === Try markitdown first (best quality), fallback to Node.js ===
     const markitdownBin = await checkMarkitdown();
-
     if (markitdownBin) {
       try {
-        const { stdout, stderr } = await execFileAsync(markitdownBin, [tempPath], {
-          timeout: 120000, maxBuffer: 50 * 1024 * 1024, env: ENV,
-        });
+        const { stdout, stderr } = await execFileAsync(markitdownBin, [tempPath], { timeout: 120000, maxBuffer: 50 * 1024 * 1024, env: ENV });
         if (stdout || !stderr) {
-          return NextResponse.json({
-            markdown: stdout,
-            filename: file.name.replace(/\.[^.]+$/, '.md'),
-            originalName: file.name,
-            fileSize: `${fileSizeMB} MB`,
-            lineCount: stdout.split('\n').length,
-            charCount: stdout.length,
-          });
+          return NextResponse.json({ markdown: stdout, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: stdout.split('\n').length, charCount: stdout.length });
         }
-      } catch {
-        // markitdown failed, continue to fallback
-      }
+      } catch { /* fallback */ }
     }
 
-    // === Node.js Fallback Conversion ===
     let markdown = '';
-
     if (PDF_EXTENSIONS.includes(ext)) {
-      try {
-        markdown = await convertPdfToMarkdown(tempPath);
-      } catch (pdfErr: unknown) {
-        const msg = pdfErr instanceof Error ? pdfErr.message : 'Unknown error';
-        return NextResponse.json({ error: `PDF 변환 실패: ${msg}` }, { status: 500 });
-      }
+      markdown = await convertPdfToMarkdown(tempPath);
     } else if (HTML_EXTENSIONS.includes(ext)) {
       const htmlContent = await readFile(tempPath, 'utf-8');
       markdown = await convertHtmlToMarkdown(htmlContent);
     } else if (ext === '.csv') {
-      const csvContent = await readFile(tempPath, 'utf-8');
-      markdown = convertCsvToMarkdown(csvContent);
+      markdown = convertCsvToMarkdown(await readFile(tempPath, 'utf-8'));
     } else if (ext === '.json') {
       const jsonContent = await readFile(tempPath, 'utf-8');
-      try {
-        const parsed = JSON.parse(jsonContent);
-        markdown = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```\n';
-      } catch {
-        markdown = '```\n' + jsonContent + '\n```\n';
-      }
+      try { markdown = '```json\n' + JSON.stringify(JSON.parse(jsonContent), null, 2) + '\n```\n'; }
+      catch { markdown = '```\n' + jsonContent + '\n```\n'; }
     } else if (OFFICE_EXTENSIONS.includes(ext)) {
-      try {
-        const text = await convertWithOfficeParser(tempPath);
-        // For XLSX/XLS, try to format as table
-        if (['.xlsx', '.xls'].includes(ext)) {
-          markdown = text;
-        } else {
-          markdown = text;
-        }
-      } catch (officeErr: unknown) {
-        const msg = officeErr instanceof Error ? officeErr.message : 'Unknown error';
-        return NextResponse.json({ error: `변환 실패: ${msg}` }, { status: 500 });
-      }
+      markdown = await convertWithOfficeParser(tempPath);
     } else {
-      // Images, audio, zip etc. - these need markitdown/special tools
-      return NextResponse.json({
-        error: `이 파일 형식(${ext})은 로컬 서버(markitdown)에서만 변환 가능합니다.\nVercel 배포 환경에서는 PDF, DOCX, PPTX, XLSX, HTML, CSV, JSON, TXT, HWP를 지원합니다.`,
-      }, { status: 400 });
+      return NextResponse.json({ error: `이 파일 형식(${ext})은 Render 서버에서만 변환 가능합니다.` }, { status: 400 });
     }
 
-    return NextResponse.json({
-      markdown,
-      filename: file.name.replace(/\.[^.]+$/, '.md'),
-      originalName: file.name,
-      fileSize: `${fileSizeMB} MB`,
-      lineCount: markdown.split('\n').length,
-      charCount: markdown.length,
-    });
+    return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    if (message.includes('TIMEOUT') || message.includes('timeout')) {
-      return NextResponse.json(
-        { error: '변환 시간이 초과되었습니다. 파일이 너무 크거나 복잡할 수 있습니다.' },
-        { status: 504 }
-      );
-    }
+    if (message.includes('timeout')) return NextResponse.json({ error: '변환 시간이 초과되었습니다.' }, { status: 504 });
     return NextResponse.json({ error: `변환 오류: ${message}` }, { status: 500 });
   } finally {
     for (const p of [tempPath, tempHtmlPath]) {
-      if (p) { try { await unlink(p); } catch { /* ignore */ } }
+      if (p) { try { await unlink(p); } catch { /* */ } }
     }
   }
 }
 
-function postProcessHwpMarkdown(md: string): string {
-  let result = md
-    .replace(/^-\s*\d+\s*-\s*$/gm, '')
-    .replace(/^#{1,6}\s*$/gm, '')
-    .replace(/\n{4,}/g, '\n\n\n')
-    .replace(/\[autonumbering[^\]]*\]/g, '')
-    .replace(/[ \t]+$/gm, '');
-
-  const lines = result.split('\n');
-  const processed: string[] = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) { processed.push(''); continue; }
-    if (/^제\d+장\s+/.test(trimmed) && !trimmed.includes('|') && trimmed.length < 30) {
-      processed.push(`## ${trimmed}`); continue;
-    }
-    if (/^제\d+조[\s(（]/.test(trimmed) && !trimmed.includes('|') && trimmed.length < 30) {
-      processed.push(`### ${trimmed}`); continue;
-    }
-    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed) && !trimmed.includes('|')) {
-      processed.push(`# ${trimmed}`); continue;
-    }
-    processed.push(line);
-  }
-
-  return processed.join('\n').trim() + '\n';
-}
-
-function formatHwpTextToMarkdown(text: string): string {
-  const lines = text.split('\n');
-  const result: string[] = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) { result.push(''); continue; }
-    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed)) { result.push(`# ${trimmed}`); }
-    else if (/^제\s*\d+\s*장/.test(trimmed)) { result.push(`## ${trimmed}`); }
-    else if (/^제\s*\d+\s*조/.test(trimmed)) { result.push(`### ${trimmed}`); }
-    else if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) { result.push(`- ${trimmed}`); }
-    else if (/^[○●■□▶▷◆◇]/.test(trimmed)) { result.push(`- ${trimmed}`); }
-    else if (/^[가나다라마바사아자차카타파하][\.\)]\s/.test(trimmed)) { result.push(`  - ${trimmed}`); }
-    else if (/^\d+[\.\)]\s/.test(trimmed)) { result.push(`${trimmed}`); }
-    else { result.push(trimmed); }
-  }
-
-  return result.join('\n');
-}
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+export const config = { api: { bodyParser: false } };
