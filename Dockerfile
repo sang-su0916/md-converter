@@ -18,19 +18,13 @@ WORKDIR /app
 
 # Install Python + MarkItDown + hwp5html
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv pipx \
+    python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install MarkItDown with all format support
-RUN pipx install markitdown && \
-    pipx inject markitdown "markitdown[pdf]" --force && \
-    pipx inject markitdown "markitdown[docx,pptx,xlsx]" --force
-
-# Install hwp5html for HWP support + all dependencies
-RUN pip3 install --break-system-packages pyhwp six olefile lxml
-
-# Add pipx bin to PATH
-ENV PATH="/root/.local/bin:${PATH}"
+# Install all Python tools via pip3
+RUN pip3 install --break-system-packages \
+    markitdown "markitdown[pdf]" "markitdown[docx,pptx,xlsx]" \
+    pyhwp six olefile lxml
 ENV HOME="/root"
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
