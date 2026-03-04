@@ -26,9 +26,8 @@ RUN pipx install markitdown && \
     pipx inject markitdown "markitdown[pdf]" --force && \
     pipx inject markitdown "markitdown[docx,pptx,xlsx]" --force
 
-# Install hwp5html for HWP support + dependencies
-RUN pipx install pyhwp && \
-    pipx inject pyhwp six --force
+# Install hwp5html for HWP support + all dependencies
+RUN pip3 install --break-system-packages pyhwp six olefile lxml
 
 # Add pipx bin to PATH
 ENV PATH="/root/.local/bin:${PATH}"
