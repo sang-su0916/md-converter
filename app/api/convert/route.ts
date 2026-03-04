@@ -30,7 +30,7 @@ function getExtension(filename: string): string {
   return idx >= 0 ? filename.slice(idx).toLowerCase() : '';
 }
 
-const HOME = process.env.HOME || '/Users/isangsu';
+const HOME = process.env.HOME || '/root';
 const ENV = {
   ...process.env,
   HOME,
