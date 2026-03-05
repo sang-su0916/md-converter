@@ -197,58 +197,177 @@ function convertCsvToMarkdown(csvContent: string): string {
 }
 
 /**
- * Convert markdown tables to plain text
- * Extracts cell content and converts to newline-separated text
- * Used for HWP layout tables that shouldn't be tables in markdown
+ * Convert only layout tables to plain text, preserve data tables as markdown
+ * Layout tables: 2-column with legal patterns (제X조/제X장 + [필수]/[선택]/착안사항/☞)
+ * Data tables: 3+ columns, or non-legal 2-column → kept as markdown table
+ * Used for HWP conversion via markitdown path
  */
-function convertMarkdownTablesToText(markdown: string): string {
+function convertLayoutTablesToText(markdown: string): string {
   const lines = markdown.split('\n');
   const result: string[] = [];
+  let tableBlock: string[] = [];
   let inTable = false;
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    
-    // Table row: | cell | cell |
-    if (/^\|.*\|$/.test(trimmed)) {
-      // Skip separator rows: | --- | --- |
-      if (/^\|[\s\-:]+(\|[\s\-:]+)+\|?$/.test(trimmed)) {
-        continue;
+
+  const flushTable = () => {
+    if (tableBlock.length === 0) return;
+
+    // Parse content rows (skip separators) for analysis
+    const contentRows: string[][] = [];
+    for (const tl of tableBlock) {
+      if (!isTableSeparator(tl)) {
+        contentRows.push(parseTableRow(tl));
       }
-      
-      inTable = true;
-      // Extract cell contents
-      const cells = trimmed
-        .replace(/^\|/, '')
-        .replace(/\|$/, '')
-        .split('|')
-        .map(c => c.trim())
-        .filter(c => c.length > 0);
-      
-      // Add each non-empty cell as a separate line
-      for (const cell of cells) {
-        if (cell) {
-          result.push(cell);
+    }
+
+    const maxCols = contentRows.length > 0 ? Math.max(...contentRows.map(r => r.length)) : 0;
+
+    // Check if layout table: 2 columns with legal patterns
+    let isLayout = false;
+    if (maxCols === 2 && contentRows.length >= 2) {
+      let score = 0;
+      for (const row of contentRows) {
+        const left = (row[0] || '').trim();
+        const right = (row[1] || '').trim();
+        if (/제\d+조|제\d+장|제\d+절/.test(left)) score++;
+        if (/\[필수\]|\[선택\]|\[필수,\s*선택\]|\[선택,\s*필수\]|착안사항|☞|◈/.test(right)) score++;
+      }
+      isLayout = score >= 3;
+    }
+
+    if (isLayout) {
+      // Layout table → text, mark right column as annotation
+      for (const row of contentRows) {
+        const left = (row[0] || '').trim();
+        const right = (row[1] || '').trim();
+        if (left) result.push(left);
+        if (right) {
+          const alreadyMarked = /^\[필수\]|^\[선택\]|^\[필수,|^\[선택,|^◈|^☞|^착안사항|^※/.test(right);
+          result.push(alreadyMarked ? right : `◈ ${right}`);
         }
       }
+      result.push('');
+    } else {
+      // Data/form table → keep as markdown table
+      for (const tl of tableBlock) {
+        result.push(tl);
+      }
+      result.push('');
+    }
+
+    tableBlock = [];
+    inTable = false;
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (/^\|.*\|$/.test(trimmed)) {
+      inTable = true;
+      tableBlock.push(trimmed);
       continue;
     }
-    
-    // Not a table row
-    if (inTable && trimmed) {
-      // Add paragraph break after table
-      result.push('');
-      inTable = false;
+
+    // Not a table row - flush accumulated table
+    if (inTable) {
+      flushTable();
     }
+
     result.push(line);
   }
-  
+
+  // Flush any remaining table
+  if (inTable) flushTable();
+
   return result.join('\n');
 }
 
 /**
+ * Parse HTML table inner content into rows of cell strings
+ */
+function parseHtmlTableToRows(tableInner: string): string[][] {
+  const rows: string[][] = [];
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(tableInner)) !== null) {
+    const cells: string[] = [];
+    const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+      const cellText = cellMatch[1]
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
+      cells.push(cellText);
+    }
+    if (cells.length > 0) rows.push(cells);
+  }
+  return rows;
+}
+
+/**
+ * Convert an HTML table block to either markdown table (data) or plain text (layout)
+ * Layout tables: 2-column legal document format → text with annotation markers
+ * Data tables: 3+ columns or non-legal → markdown table syntax
+ */
+function htmlTableToMarkdownOrText(tableInner: string): string {
+  const rows = parseHtmlTableToRows(tableInner);
+  if (rows.length === 0) return '\n';
+
+  const maxCols = Math.max(...rows.map(r => r.length));
+
+  // Check if this is a layout table (2 cols with legal patterns)
+  if (maxCols <= 2 && rows.length >= 3) {
+    let score = 0;
+    for (const row of rows) {
+      const left = row[0] || '';
+      const right = row[1] || '';
+      if (/제\d+조|제\d+장|제\d+절/.test(left)) score++;
+      if (/\[필수\]|\[선택\]|\[필수,\s*선택\]|\[선택,\s*필수\]|착안사항|☞|◈/.test(right)) score++;
+    }
+    if (score >= 3) {
+      // Layout table → text extraction, mark right column as annotation
+      const textLines: string[] = [];
+      for (const row of rows) {
+        const left = (row[0] || '').trim();
+        const right = (row[1] || '').trim();
+        if (left) textLines.push(left);
+        if (right) {
+          const alreadyMarked = /^\[필수\]|^\[선택\]|^\[필수,|^\[선택,|^◈|^☞|^착안사항|^※/.test(right);
+          textLines.push(alreadyMarked ? right : `◈ ${right}`);
+        }
+      }
+      return '\n' + textLines.join('\n') + '\n\n';
+    }
+  }
+
+  // Data table (3+ cols or non-legal 2-col) → markdown table
+  const normalized = rows.map(row => {
+    const r = [...row];
+    while (r.length < maxCols) r.push('');
+    return r;
+  });
+
+  const mdLines: string[] = [''];
+  mdLines.push('| ' + normalized[0].map(c => c.replace(/\|/g, '\\|')).join(' | ') + ' |');
+  mdLines.push('| ' + normalized[0].map(() => '---').join(' | ') + ' |');
+  for (let i = 1; i < normalized.length; i++) {
+    mdLines.push('| ' + normalized[i].map(c => c.replace(/\|/g, '\\|')).join(' | ') + ' |');
+  }
+  mdLines.push('');
+
+  return mdLines.join('\n');
+}
+
+/**
  * Extract clean text from HWP-generated HTML
- * Strips table layout markup and preserves content structure
+ * Preserves data tables as markdown, converts layout tables to text
  * This avoids markitdown's faithful table conversion which makes layout tables unreadable
  */
 function extractTextFromHwpHtml(html: string): string {
@@ -260,6 +379,16 @@ function extractTextFromHwpHtml(html: string): string {
   // Remove <style> and <script> tags
   text = text.replace(/<style[\s\S]*?<\/style>/gi, '');
   text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
+
+  // Process HTML tables: data tables → markdown, layout tables → text
+  // Handle innermost tables first (no nested tables inside), iterate outward
+  let tableIterations = 0;
+  while (/<table[^>]*>((?:(?!<table)[\s\S])*?)<\/table>/i.test(text) && tableIterations < 20) {
+    text = text.replace(/<table[^>]*>((?:(?!<table)[\s\S])*?)<\/table>/gi, (_match, inner) => {
+      return htmlTableToMarkdownOrText(inner);
+    });
+    tableIterations++;
+  }
 
   // Convert <br> to newline
   text = text.replace(/<br\s*\/?>/gi, '\n');
@@ -656,19 +785,33 @@ function formatHwpTextToMarkdown(text: string): string {
       continue;
     }
 
-    // 착안사항 / annotation markers
-    if (/^◈\s/.test(trimmed) || /^\[필수\]/.test(trimmed) || /^\[선택\]/.test(trimmed)
-        || /^☞\s*\(참고\)/.test(trimmed) || /^착안사항/.test(trimmed)) {
-      result.push(`> ${trimmed}`);
+    // 착안사항 / annotation markers - expanded detection
+    const isAnnotationStart = /^◈/.test(trimmed)
+      || /^\[필수\]/.test(trimmed) || /^\[선택\]/.test(trimmed)
+      || /^\[필수,\s*선택\]/.test(trimmed) || /^\[선택,\s*필수\]/.test(trimmed)
+      || /^☞/.test(trimmed) || /^착안사항/.test(trimmed)
+      || /^※\s/.test(trimmed)
+      || (/\[필수\]|\[선택\]|\[필수,\s*선택\]|\[선택,\s*필수\]/.test(trimmed) && !/^제\s*\d+/.test(trimmed));
+    if (isAnnotationStart) {
+      result.push(`> **착안사항**: ${trimmed}`);
       inAnnotation = true;
       continue;
     }
 
-    // Continuation of annotation (indented or starts with specific patterns)
-    if (inAnnotation && (/^\*\s/.test(trimmed) || /^☞/.test(trimmed) || /^-\s/.test(trimmed)
-        || /^다만/.test(trimmed) || /^단,/.test(trimmed))) {
-      result.push(`> ${trimmed}`);
-      continue;
+    // Continuation of annotation block
+    if (inAnnotation) {
+      const startsNewElement = /^제\s*\d+\s*(조|장|절)/.test(trimmed)
+        || /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]/.test(trimmed)
+        || /^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/.test(trimmed)
+        || /^부\s*칙/.test(trimmed)
+        || /^\[?별지/.test(trimmed)
+        || /^\|/.test(trimmed);
+      if (!startsNewElement) {
+        result.push(`> ${trimmed}`);
+        continue;
+      }
+      inAnnotation = false;
+      // Fall through to process as normal element
     }
 
     // "부 칙" or appendix
@@ -869,7 +1012,7 @@ export async function POST(request: NextRequest) {
         conversionMethod = `hwp5html failed: ${e instanceof Error ? e.message : String(e)}`;
       }
 
-      // Method 2: hwp5html → markitdown → convertMarkdownTablesToText → formatHwpTextToMarkdown
+      // Method 2: hwp5html → markitdown → convertLayoutTablesToText → formatHwpTextToMarkdown
       try {
         if (!htmlSize) {
           await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
@@ -880,7 +1023,7 @@ export async function POST(request: NextRequest) {
           if (stdout.trim().length > 500) {
             conversionMethod = 'hwp5html→markitdown→tableToText';
             // Convert markdown tables to plain text, then apply HWP formatter
-            const textWithoutTables = convertMarkdownTablesToText(stdout);
+            const textWithoutTables = convertLayoutTablesToText(stdout);
             const markdown = formatHwpTextToMarkdown(textWithoutTables);
             return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length, textSize: textWithoutTables.length } });
           }
