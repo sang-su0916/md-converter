@@ -1372,7 +1372,7 @@ export async function POST(request: NextRequest) {
 
     if (TEXT_EXTENSIONS.includes(ext)) {
       const textContent = await readFile(tempPath, 'utf-8');
-      return jsonWithCors({ markdown: textContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: textContent.split('\n').length, charCount: textContent.length });
+      return jsonWithCors({ markdown: textContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret3-L1375", lineCount: textContent.split('\n').length, charCount: textContent.length });
     }
 
     if (HWP_EXTENSIONS.includes(ext)) {
@@ -1412,7 +1412,7 @@ export async function POST(request: NextRequest) {
         if (plainText.trim().length > 500) {
           conversionMethod = 'hwp5html→extractText';
           const markdown = formatHwpTextToMarkdown(plainText);
-          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, plainTextSize } });
+          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret4-L1415", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, plainTextSize } });
         }
         conversionMethod = 'hwp5html→extractText (too short, trying next)';
       } catch (e: unknown) {
@@ -1432,7 +1432,7 @@ export async function POST(request: NextRequest) {
             // Convert markdown tables to plain text, then apply HWP formatter
             const textWithoutTables = convertLayoutTablesToText(stdout);
             const markdown = formatHwpTextToMarkdown(textWithoutTables);
-            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length, textSize: textWithoutTables.length } });
+            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret5-L1435", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length, textSize: textWithoutTables.length } });
           }
         }
       } catch { /* markitdown failed */ }
@@ -1443,7 +1443,7 @@ export async function POST(request: NextRequest) {
         if (hwpText && hwpText.trim().length > 200) {
           conversionMethod = 'hwp5txt';
           const markdown = formatHwpTextToMarkdown(hwpText);
-          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, hwp5txtSize: hwpText.length, htmlSize, plainTextSize } });
+          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret6-L1446", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, hwp5txtSize: hwpText.length, htmlSize, plainTextSize } });
         }
       } catch { /* hwp5txt also failed */ }
 
@@ -1456,7 +1456,7 @@ export async function POST(request: NextRequest) {
       try {
         const { stdout, stderr } = await execFileAsync(markitdownBin, [tempPath], { timeout: 120000, maxBuffer: 50 * 1024 * 1024, env: ENV });
         if (stdout || !stderr) {
-          return jsonWithCors({ markdown: stdout, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: stdout.split('\n').length, charCount: stdout.length });
+          return jsonWithCors({ markdown: stdout, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret7-L1459", lineCount: stdout.split('\n').length, charCount: stdout.length });
         }
       } catch { /* fallback */ }
     }
