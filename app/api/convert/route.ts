@@ -1465,15 +1465,27 @@ export async function POST(request: NextRequest) {
     let _pdfDebug = '';
     if (PDF_EXTENSIONS.includes(ext)) {
       markdown = await convertPdfToMarkdown(tempPath);
-      const pdfHeadings = markdown.split('\n').filter(l => l.startsWith('#')).length;
-      _pdfDebug = `path=convertPdfToMarkdown,headings=${pdfHeadings},lines=${markdown.split('\n').length}`;
-      // PDF 로컬 변환 실패 시 Render 백엔드로 프록시
+      // If convertPdfToMarkdown returns something, ALWAYS post-process locally
+      // Do NOT proxy to Render even if empty - force local processing
       if (!markdown || markdown.trim().length === 0) {
-        return proxyToRender(file, ext);
+        // Last resort: try to read as text and structure it
+        try {
+          const rawBytes = await readFile(tempPath);
+          markdown = rawBytes.toString('utf-8', 0, Math.min(rawBytes.length, 1024 * 1024)); // 1MB max
+        } catch {
+          markdown = '(PDF 변환 실패 - 내용을 추출할 수 없습니다)';
+        }
       }
+      _pdfDebug = `local-only,lines=${markdown.split('\n').length}`;
+      // CRITICAL: Always apply post-processing for PDF
+      markdown = postProcessPdfMarkdown(markdown);
+      const pdfHeadings = markdown.split('\n').filter(l => l.startsWith('#')).length;
+      _pdfDebug += `,headings=${pdfHeadings}`;
     } else if (HTML_EXTENSIONS.includes(ext)) {
       const htmlContent = await readFile(tempPath, 'utf-8');
       markdown = await convertHtmlToMarkdown(htmlContent);
+      // Always post-process HTML locally
+      markdown = postProcessHtmlMarkdown(markdown);
     } else if (ext === '.csv') {
       markdown = convertCsvToMarkdown(await readFile(tempPath, 'utf-8'));
     } else if (ext === '.json') {
