@@ -530,55 +530,39 @@ function postProcessPdfMarkdown(md: string): string {
   output = output.replace(/^#\s*\n+(?=##)/gm, '');
 
   // Phase 7: Ensure document has a proper title
-  const linesPhase7 = output.split('\n');
-  let hasTitle = false;
+  let linesPhase7 = output.split('\n');
   
-  // Check if first 3 lines contain a # heading
-  for (let i = 0; i < Math.min(3, linesPhase7.length); i++) {
-    if (linesPhase7[i].trim().startsWith('# ')) {
-      hasTitle = true;
-      break;
-    }
-  }
+  // Find first # heading position
+  let firstH1Idx = linesPhase7.findIndex(l => l.trim().startsWith('# '));
   
-  if (!hasTitle) {
-    // Find first ## heading (skip intro lines)
-    let firstH2Idx = -1;
-    for (let i = 0; i < linesPhase7.length; i++) {
-      if (linesPhase7[i].trim().startsWith('## ')) {
-        firstH2Idx = i;
-        break;
+  if (firstH1Idx === -1 || firstH1Idx > 5) {
+    // No # title or too far down — promote first ##
+    const firstH2Idx = linesPhase7.findIndex(l => l.trim().startsWith('## '));
+    if (firstH2Idx >= 0) {
+      const h2Text = linesPhase7[firstH2Idx].replace(/^##\s+/, '').trim();
+      if (h2Text.length < 120) {
+        linesPhase7[firstH2Idx] = `# ${h2Text}`;
       }
-    }
-    
-    if (firstH2Idx >= 0 && linesPhase7[firstH2Idx].length < 100) {
-      // Promote this ## to #
-      linesPhase7[firstH2Idx] = linesPhase7[firstH2Idx].replace(/^##\s+/, '# ');
-      output = linesPhase7.join('\n');
     } else {
-      // No suitable ## — use first substantial non-heading line as title (truncate if needed)
+      // No ## either — extract first non-heading text as title
       for (let i = 0; i < Math.min(5, linesPhase7.length); i++) {
         const t = linesPhase7[i].trim();
         if (t && !t.startsWith('#') && t.length > 10) {
-          const title = t.length > 80 ? t.slice(0, 80).trim() : t;
-          output = `# ${title}\n\n${output}`;
+          const title = t.slice(0, 80).trim();
+          linesPhase7.unshift(`# ${title}`, '');
           break;
         }
       }
     }
   } else {
-    // Has # heading but might be too long — truncate if > 100 chars
-    for (let i = 0; i < Math.min(3, linesPhase7.length); i++) {
-      if (linesPhase7[i].trim().startsWith('# ')) {
-        const heading = linesPhase7[i].trim();
-        if (heading.length > 100) {
-          linesPhase7[i] = heading.slice(0, 100).trim();
-          output = linesPhase7.join('\n');
-        }
-        break;
-      }
+    // Has # title but check if too long
+    const h1Text = linesPhase7[firstH1Idx].trim();
+    if (h1Text.length > 100) {
+      linesPhase7[firstH1Idx] = h1Text.slice(0, 90).trim();
     }
   }
+  
+  output = linesPhase7.join('\n');
 
   return output.replace(/\n{4,}/g, '\n\n\n').replace(/\f/g, '').trim() + '\n';
 }
