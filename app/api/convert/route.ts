@@ -420,7 +420,57 @@ function postProcessPdfMarkdown(md: string): string {
     result.push(trimmed);
   }
 
-  return result.join('\n').replace(/\n{4,}/g, '\n\n\n').replace(/\f/g, '').trim() + '\n';
+  let output = result.join('\n');
+
+  // Phase 2: Remove page numbers from headings
+  // "# 87 Ⅰ 고용장려금" → "# Ⅰ 고용장려금"
+  // "# 3 Ⅱ." → skip (TOC artifact)
+  output = output.replace(/^(#{1,4})\s+\d{1,3}\s+([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩㄱ-ㅎ가-힣])/gm, '$1 $2');
+  // "## 사업개요\n\n\n6 2." → remove orphan page+section numbers
+  output = output.replace(/^(\d{1,3})\s+(\d+)\.\s*$/gm, '');
+
+  // Phase 3: Split circled numbers embedded in long lines
+  // "...한다. ① 내용 ② 내용" → separate lines
+  output = output.replace(/([다함음임됨짐요].)\s*(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)/g, '$1\n\n$2');
+  // Also split when circled numbers appear mid-line without sentence ending
+  output = output.replace(/\s+(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)\s/g, '\n\n$1 ');
+
+  // Phase 4: Split very long lines (300+ chars) at sentence boundaries
+  const lines2 = output.split('\n');
+  const result2: string[] = [];
+  for (const line of lines2) {
+    if (line.length > 300 && !line.startsWith('#') && !line.startsWith('|')) {
+      // Split at Korean sentence endings followed by space
+      const split = line.replace(/([다함음임됨짐요]\.)\s+/g, '$1\n\n').split('\n');
+      result2.push(...split);
+    } else {
+      result2.push(line);
+    }
+  }
+  output = result2.join('\n');
+
+  // Phase 5: Remove TOC duplicates (lines like "사업개요 6" or "지원 절차 19")
+  output = output.replace(/^(#{1,4}\s+)(.+?)\s+\d{1,3}\s*$/gm, '$1$2');
+
+  // Phase 6: Clean up artifacts
+  // Remove standalone page numbers on their own line
+  output = output.replace(/^\d{1,3}\s*$/gm, '');
+  // Remove orphan dots/periods
+  output = output.replace(/^\.{2,}\s*$/gm, '');
+  // Fix double headings: "# \n\n## title" → just "## title"
+  output = output.replace(/^#\s*\n+(?=##)/gm, '');
+
+  // Phase 7: Ensure document has a title
+  const firstHeading = output.match(/^#\s+.+$/m);
+  if (!firstHeading || output.indexOf(firstHeading[0]) > 500) {
+    // First non-empty line that's not a heading could be the title
+    const firstLine = output.split('\n').find(l => l.trim() && !l.startsWith('#') && l.trim().length > 5);
+    if (firstLine && firstLine.trim().length < 200) {
+      output = `# ${firstLine.trim()}\n\n${output}`;
+    }
+  }
+
+  return output.replace(/\n{4,}/g, '\n\n\n').replace(/\f/g, '').trim() + '\n';
 }
 
 /**
