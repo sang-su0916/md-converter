@@ -65,18 +65,21 @@ async function proxyToRender(file: File, ext?: string): Promise<Response> {
   const data = await res.json() as any;
 
   // Post-process Render response for PDF and HTML
+  // Debug: always add _proxyDebug field
+  data._proxyDebug = `ext=${ext}, hasMarkdown=${!!data.markdown}, isPDF=${ext ? PDF_EXTENSIONS.includes(ext) : false}`;
+  
   if (data.markdown && ext) {
     if (PDF_EXTENSIONS.includes(ext)) {
       data.markdown = postProcessPdfMarkdown(data.markdown);
       data.lineCount = data.markdown.split('\n').length;
       data.charCount = data.markdown.length;
-      data._v = 'v8-render-pdf';
+      data._v = 'v9-render-pdf';
       data._ext = ext;
     } else if (HTML_EXTENSIONS.includes(ext)) {
       data.markdown = postProcessHtmlMarkdown(data.markdown);
       data.lineCount = data.markdown.split('\n').length;
       data.charCount = data.markdown.length;
-      data._v = 'v8-render-html';
+      data._v = 'v9-render-html';
       data._ext = ext;
     }
   }
