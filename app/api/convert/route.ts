@@ -1299,7 +1299,8 @@ export async function POST(request: NextRequest) {
     }
 
     const markitdownBin = await checkMarkitdown();
-    if (markitdownBin) {
+    // Skip markitdown for PDF and HTML — use our custom processors for better structure
+    if (markitdownBin && !PDF_EXTENSIONS.includes(ext) && !HTML_EXTENSIONS.includes(ext)) {
       try {
         const { stdout, stderr } = await execFileAsync(markitdownBin, [tempPath], { timeout: 120000, maxBuffer: 50 * 1024 * 1024, env: ENV });
         if (stdout || !stderr) {
