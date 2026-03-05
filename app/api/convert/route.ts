@@ -277,20 +277,7 @@ async function convertHtmlToMarkdown(htmlContent: string): Promise<string> {
   const TurndownService = (await import('turndown')).default;
   const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
 
-  // Pre-process: convert common email/newsletter patterns to proper headings
-  let processed = htmlContent;
-
-  // Large/bold font in td/div → h2 (email templates often use inline styles)
-  processed = processed.replace(
-    /<(?:td|div|p|span)[^>]*style="[^"]*font-size:\s*(2[0-9]|[3-9]\d)\s*px[^"]*font-weight:\s*(?:bold|[6-9]\d{2})[^"]*"[^>]*>(.*?)<\/(?:td|div|p|span)>/gi,
-    '<h2>$2</h2>'
-  );
-  processed = processed.replace(
-    /<(?:td|div|p|span)[^>]*style="[^"]*font-weight:\s*(?:bold|[6-9]\d{2})[^"]*font-size:\s*(2[0-9]|[3-9]\d)\s*px[^"]*"[^>]*>(.*?)<\/(?:td|div|p|span)>/gi,
-    '<h2>$2</h2>'
-  );
-
-  let md = turndown.turndown(processed);
+  let md = turndown.turndown(htmlContent);
 
   // Post-process: detect heading-like patterns in the output
   const lines = md.split('\n');
