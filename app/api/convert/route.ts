@@ -481,7 +481,37 @@ function postProcessPdfMarkdown(md: string): string {
       text = text.replace(/\)\s+([①②③④⑤⑥⑦⑧⑨⑩❶❷❸❹❺])/g, ')\n\n$1');
       // Split at Roman numeral chapter markers
       text = text.replace(/\s+([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]\.)/g, '\n\n# $1');
-      result2.push(...text.split('\n'));
+      
+      // If still > 250 chars after above splits, apply comma/semicolon splitting
+      const segments = text.split('\n');
+      const refined: string[] = [];
+      for (const seg of segments) {
+        if (seg.length > 250) {
+          // Split at comma/semicolon followed by space and new sentence start
+          let s = seg.replace(/([,;])\s+([A-Z가-힣①②③④⑤⑥⑦⑧⑨⑩\-])/g, '$1\n\n$2');
+          // Last resort: force split at 200-char word boundaries
+          if (s.length > 300) {
+            const words = s.split(/\s+/);
+            let chunk = '';
+            const chunks: string[] = [];
+            for (const w of words) {
+              if (chunk.length + w.length > 200 && chunk.length > 50) {
+                chunks.push(chunk.trim());
+                chunk = w + ' ';
+              } else {
+                chunk += w + ' ';
+              }
+            }
+            if (chunk.trim()) chunks.push(chunk.trim());
+            refined.push(...chunks);
+          } else {
+            refined.push(...s.split('\n'));
+          }
+        } else {
+          refined.push(seg);
+        }
+      }
+      result2.push(...refined);
     } else {
       result2.push(line);
     }
@@ -499,20 +529,28 @@ function postProcessPdfMarkdown(md: string): string {
   // Fix double headings: "# \n\n## title" → just "## title"
   output = output.replace(/^#\s*\n+(?=##)/gm, '');
 
-  // Phase 7: Ensure document has a title
+  // Phase 7: Ensure document has a proper title
   const firstHeading = output.match(/^#\s+.+$/m);
   const firstHeadingPos = firstHeading ? output.indexOf(firstHeading[0]) : -1;
+  
   if (!firstHeading || firstHeadingPos > 500) {
-    // First non-empty, non-heading line could be the title
-    const firstLine = output.split('\n').find(l => l.trim() && !l.startsWith('#') && l.trim().length > 5);
-    if (firstLine && firstLine.trim().length < 200) {
-      output = `# ${firstLine.trim()}\n\n${output}`;
+    // No # heading or too far down — promote first ##
+    const firstH2 = output.match(/^##\s+(.+)$/m);
+    if (firstH2 && firstH2[1].trim().length < 100) {
+      // Replace first ## with #
+      output = output.replace(/^##\s+/, '# ');
+    } else {
+      // Use first non-heading line as title
+      const firstLine = output.split('\n').find(l => l.trim() && !l.startsWith('#') && l.trim().length > 5 && l.trim().length < 150);
+      if (firstLine) {
+        output = `# ${firstLine.trim()}\n\n${output}`;
+      }
     }
   } else if (firstHeading && firstHeading[0].length > 120) {
-    // First heading is garbage (too long) — try ## as real title
+    // First heading too long — promote first ##
     const firstH2 = output.match(/^##\s+(.+)$/m);
-    if (firstH2) {
-      output = `# ${firstH2[1].trim()}\n\n${output}`;
+    if (firstH2 && firstH2[1].trim().length < 100) {
+      output = output.replace(/^##\s+/, '# ');
     }
   }
 
