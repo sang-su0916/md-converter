@@ -53,6 +53,8 @@ export default function Home() {
     }
   }, [handleFile]);
 
+  const CONVERT_API = process.env.NEXT_PUBLIC_CONVERT_API || 'https://md-converter-ghdf.onrender.com/api/convert';
+
   const handleConvert = async () => {
     if (!file) return;
     setLoading(true);
@@ -68,7 +70,7 @@ export default function Home() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('/api/convert', { method: 'POST', body: formData });
+      const res = await fetch(CONVERT_API, { method: 'POST', body: formData });
       const data = await res.json();
 
       if (!res.ok) {

@@ -8,6 +8,13 @@ import { randomUUID } from 'crypto';
 
 const execFileAsync = promisify(execFile);
 
+// CORS: allow Vercel frontend to call Render API directly
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
 // If RENDER_API_URL is set, proxy to Render backend (Vercel mode)
 const RENDER_API_URL = process.env.RENDER_API_URL;
 
@@ -55,7 +62,7 @@ async function proxyToRender(file: File): Promise<Response> {
   });
 
   const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+  return jsonWithCors(data, res.status);
 }
 
 let markitdownAvailable: boolean | null = null;
@@ -200,13 +207,22 @@ function formatHwpTextToMarkdown(text: string): string {
   return result.join('\n');
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function jsonWithCors(data: any, status = 200) {
+  return NextResponse.json(data, { status, headers: CORS_HEADERS });
+}
+
 export async function POST(request: NextRequest) {
   // === PROXY MODE (Vercel → Render) ===
   if (RENDER_API_URL) {
     try {
       const formData = await request.formData();
       const file = formData.get('file') as File | null;
-      if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 });
+      if (!file) return jsonWithCors({ error: '파일을 선택해 주세요.' }, 400);
 
       const renderFormData = new FormData();
       renderFormData.append('file', file);
@@ -216,10 +232,10 @@ export async function POST(request: NextRequest) {
         body: renderFormData,
       });
       const data = await res.json();
-      return NextResponse.json(data, { status: res.status });
+      return jsonWithCors(data, res.status);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      return NextResponse.json({ error: `서버 연결 오류: ${message}` }, { status: 502 });
+      return jsonWithCors({ error: `서버 연결 오류: ${message}` }, 502);
     }
   }
 
@@ -230,11 +246,11 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 });
+    if (!file) return jsonWithCors({ error: '파일을 선택해 주세요.' }, 400);
 
     const ext = getExtension(file.name);
     if (!SUPPORTED_EXTENSIONS.includes(ext)) {
-      return NextResponse.json({ error: `지원하지 않는 파일 형식입니다: ${ext}` }, { status: 400 });
+      return jsonWithCors({ error: `지원하지 않는 파일 형식입니다: ${ext}` }, 400);
     }
 
     const tempDir = join(tmpdir(), 'md-converter');
@@ -248,7 +264,7 @@ export async function POST(request: NextRequest) {
 
     if (TEXT_EXTENSIONS.includes(ext)) {
       const textContent = await readFile(tempPath, 'utf-8');
-      return NextResponse.json({ markdown: textContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: textContent.split('\n').length, charCount: textContent.length });
+      return jsonWithCors({ markdown: textContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: textContent.split('\n').length, charCount: textContent.length });
     }
 
     if (HWP_EXTENSIONS.includes(ext)) {
@@ -284,15 +300,15 @@ export async function POST(request: NextRequest) {
           const htmlContent = await readFile(tempHtmlPath, 'utf-8');
           markdown = postProcessHwpMarkdown(await convertHtmlToMarkdown(htmlContent));
         }
-        return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+        return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
       } catch (hwpError: unknown) {
         try {
           const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
           const markdown = formatHwpTextToMarkdown(hwpText);
-          return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
         } catch {
           const msg = hwpError instanceof Error ? hwpError.message : 'Unknown error';
-          return NextResponse.json({ error: `HWP 변환 오류: ${msg}` }, { status: 500 });
+          return jsonWithCors({ error: `HWP 변환 오류: ${msg}` }, 500);
         }
       }
     }
@@ -302,7 +318,7 @@ export async function POST(request: NextRequest) {
       try {
         const { stdout, stderr } = await execFileAsync(markitdownBin, [tempPath], { timeout: 120000, maxBuffer: 50 * 1024 * 1024, env: ENV });
         if (stdout || !stderr) {
-          return NextResponse.json({ markdown: stdout, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: stdout.split('\n').length, charCount: stdout.length });
+          return jsonWithCors({ markdown: stdout, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: stdout.split('\n').length, charCount: stdout.length });
         }
       } catch { /* fallback */ }
     }
@@ -326,11 +342,11 @@ export async function POST(request: NextRequest) {
       return proxyToRender(file);
     }
 
-    return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    if (message.includes('timeout')) return NextResponse.json({ error: '변환 시간이 초과되었습니다.' }, { status: 504 });
-    return NextResponse.json({ error: `변환 오류: ${message}` }, { status: 500 });
+    if (message.includes('timeout')) return jsonWithCors({ error: '변환 시간이 초과되었습니다.' }, 504);
+    return jsonWithCors({ error: `변환 오류: ${message}` }, 500);
   } finally {
     for (const p of [tempPath, tempHtmlPath]) {
       if (p) { try { await unlink(p); } catch { /* */ } }
