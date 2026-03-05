@@ -87,6 +87,8 @@ async function checkMarkitdown(): Promise<string | null> {
 }
 
 async function convertPdfToMarkdown(filePath: string): Promise<string> {
+  let rawText = '';
+
   // Strategy 1: pdf-parse (stable on serverless)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -94,25 +96,124 @@ async function convertPdfToMarkdown(filePath: string): Promise<string> {
     const buffer = await readFile(filePath);
     const result = await pdfParse(buffer);
     if (result.text && result.text.trim().length > 0) {
-      return result.text;
+      rawText = result.text;
     }
   } catch (e: unknown) {
     console.error('pdf-parse failed:', e instanceof Error ? e.message : e);
   }
 
   // Strategy 2: unpdf fallback
-  try {
-    const { extractText, getDocumentProxy } = await import('unpdf');
-    const buffer = await readFile(filePath);
-    const pdf = await getDocumentProxy(new Uint8Array(buffer));
-    const { text } = await extractText(pdf, { mergePages: true });
-    if (text && text.trim().length > 0) return text;
-  } catch (e: unknown) {
-    console.error('unpdf failed:', e instanceof Error ? e.message : e);
+  if (!rawText) {
+    try {
+      const { extractText, getDocumentProxy } = await import('unpdf');
+      const buffer = await readFile(filePath);
+      const pdf = await getDocumentProxy(new Uint8Array(buffer));
+      const { text } = await extractText(pdf, { mergePages: true });
+      if (text && text.trim().length > 0) rawText = text;
+    } catch (e: unknown) {
+      console.error('unpdf failed:', e instanceof Error ? e.message : e);
+    }
   }
 
-  // Both failed - return empty, caller will proxy to Render
-  return '';
+  if (!rawText) return '';
+
+  // Post-process: structure the raw text into readable markdown
+  return formatPdfText(rawText);
+}
+
+/**
+ * Format raw PDF text into structured markdown
+ * Handles: paragraph breaks, headings, list items, tables
+ */
+function formatPdfText(text: string): string {
+  // Normalize line endings
+  let result = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // If text is essentially one huge line, split on sentence boundaries
+  const lines = result.split('\n');
+  if (lines.length <= 3 && result.length > 1000) {
+    // Single-line dump: split on double spaces or period+space patterns
+    result = result
+      .replace(/\s{3,}/g, '\n\n')  // Triple+ spaces → paragraph break
+      .replace(/\s{2}/g, '\n')      // Double spaces → line break
+      .replace(/([.!?])\s+([A-Z가-힣ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ①②③④⑤⑥⑦⑧⑨⑩])/g, '$1\n\n$2')  // Sentence end + capital/Korean start
+      .replace(/(·{3,}|\.{3,})\s*/g, '\n')  // Dots/middots as separators
+      .replace(/(\d+)\s*페이지/g, '\n---\n')  // Page numbers
+      ;
+  }
+
+  // Split into lines for processing
+  const outputLines = result.split('\n');
+  const formatted: string[] = [];
+
+  for (const line of outputLines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      formatted.push('');
+      continue;
+    }
+
+    // Roman numeral headings: Ⅰ. Ⅱ. etc.
+    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed)) {
+      formatted.push('', `# ${trimmed}`, '');
+      continue;
+    }
+
+    // Numeric major headings: "1. 제목" (short, likely heading)
+    if (/^\d+\.\s/.test(trimmed) && trimmed.length < 60 && !/[,;]/.test(trimmed)) {
+      formatted.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Korean chapter/article patterns
+    if (/^제\s*\d+\s*장\s/.test(trimmed) && trimmed.length < 50) {
+      formatted.push('', `## ${trimmed}`, '');
+      continue;
+    }
+    if (/^제\s*\d+\s*조[\s(]/.test(trimmed) && trimmed.length < 80) {
+      formatted.push('', `### ${trimmed}`, '');
+      continue;
+    }
+
+    // CONTENTS/목차 heading
+    if (/^(CONTENTS|목차|차례|TABLE OF CONTENTS)\s*$/i.test(trimmed)) {
+      formatted.push('', `# ${trimmed}`, '');
+      continue;
+    }
+
+    // ALL-CAPS or short bold-like lines (likely section titles)
+    if (trimmed.length < 40 && /^[A-Z\s]+$/.test(trimmed) && trimmed.length > 3) {
+      formatted.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Circled number items: ① ② etc.
+    if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) {
+      formatted.push('', trimmed);
+      continue;
+    }
+
+    // Bullet-like markers
+    if (/^[○●■□▶▷◆◇·•-]\s/.test(trimmed)) {
+      formatted.push(`- ${trimmed.slice(2)}`);
+      continue;
+    }
+
+    // Short standalone lines (likely titles/labels)
+    if (trimmed.length < 30 && !trimmed.endsWith('.') && !trimmed.endsWith(',')
+        && !/^\d/.test(trimmed) && formatted.length > 0
+        && formatted[formatted.length - 1] === '') {
+      formatted.push(`**${trimmed}**`);
+      formatted.push('');
+      continue;
+    }
+
+    formatted.push(trimmed);
+  }
+
+  return formatted.join('\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim() + '\n';
 }
 
 async function convertWithOfficeParser(filePath: string): Promise<string> {
@@ -175,7 +276,51 @@ function contentToMarkdown(content: ContentNode[], docType?: string): string {
 async function convertHtmlToMarkdown(htmlContent: string): Promise<string> {
   const TurndownService = (await import('turndown')).default;
   const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
-  return turndown.turndown(htmlContent);
+
+  // Pre-process: convert common email/newsletter patterns to proper headings
+  let processed = htmlContent;
+
+  // Large/bold font in td/div → h2 (email templates often use inline styles)
+  processed = processed.replace(
+    /<(?:td|div|p|span)[^>]*style="[^"]*font-size:\s*(2[0-9]|[3-9]\d)\s*px[^"]*font-weight:\s*(?:bold|[6-9]\d{2})[^"]*"[^>]*>(.*?)<\/(?:td|div|p|span)>/gi,
+    '<h2>$2</h2>'
+  );
+  processed = processed.replace(
+    /<(?:td|div|p|span)[^>]*style="[^"]*font-weight:\s*(?:bold|[6-9]\d{2})[^"]*font-size:\s*(2[0-9]|[3-9]\d)\s*px[^"]*"[^>]*>(.*?)<\/(?:td|div|p|span)>/gi,
+    '<h2>$2</h2>'
+  );
+
+  let md = turndown.turndown(processed);
+
+  // Post-process: detect heading-like patterns in the output
+  const lines = md.split('\n');
+  const result: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // TOPIC XX pattern → heading
+    if (/^TOPIC\s+\d+/i.test(trimmed)) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Short bold lines that look like section titles
+    if (/^\*\*[^*]+\*\*$/.test(trimmed) && trimmed.length < 80
+        && !trimmed.includes('http') && !trimmed.includes('@')) {
+      const title = trimmed.replace(/\*\*/g, '');
+      // Only promote if it's a likely heading (short, no punctuation at end)
+      if (title.length < 60 && !title.endsWith('.') && !title.endsWith(',')) {
+        result.push('', `## ${title}`, '');
+        continue;
+      }
+    }
+
+    result.push(line);
+  }
+
+  return result.join('\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim() + '\n';
 }
 
 function convertCsvToMarkdown(csvContent: string): string {
