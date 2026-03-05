@@ -469,23 +469,19 @@ function postProcessPdfMarkdown(md: string): string {
   const lines2 = output.split('\n');
   const result2: string[] = [];
   for (const line of lines2) {
-    if (line.length > 150 && !line.startsWith('#') && !line.startsWith('|')) {
-      // Split at Korean sentence endings followed by space
-      let split = line.replace(/([다함음임됨짐요니까]\.)\s+/g, '$1\n\n');
-      // Split at parenthesized references followed by new topic
-      split = split.replace(/\)\s+([\d①②③④⑤⑥⑦⑧⑨⑩])/g, ')\n\n$1');
-      // Split at "지원 XX" patterns after sentence end
-      split = split.replace(/([다함음됨])\s+(지원|신청|문의)/g, '$1\n\n$2');
+    if (line.length > 150 && !line.startsWith('|')) {
+      let text = (line.startsWith('#') && line.length > 100) ? line.replace(/^#{1,4}\s+/, '') : line;
+      // Split at ANY sentence-ending period followed by space+capital/Korean/number
+      text = text.replace(/\.\s+([A-Z가-힣①②③④⑤⑥⑦⑧⑨⑩❶❷❸❹❺\d*\-])/g, '.\n\n$1');
       // Split at Part/Chapter markers
-      split = split.replace(/\s+(Part\s+\d|Part\s+[ⅠⅡⅢ]|제\d+장|제\d+절)/g, '\n\n## $1');
-      // Split at numbered section markers: "1.1." "2.3." etc.
-      split = split.replace(/\s+(\d+\.\d+\.)\s/g, '\n\n### $1 ');
-      result2.push(...split.split('\n'));
-    } else if (line.startsWith('#') && line.length > 100) {
-      // Long heading — downgrade to text and split
-      const text = line.replace(/^#{1,4}\s+/, '');
-      let split = text.replace(/([다함음임됨짐요니까]\.)\s+/g, '$1\n\n');
-      result2.push(...split.split('\n'));
+      text = text.replace(/\s+(Part\s+\d|Part\s+[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]|제\d+장|제\d+절)/gi, '\n\n## $1');
+      // Split at numbered section markers
+      text = text.replace(/\s+(\d+\.\d+\.)\s/g, '\n\n### $1 ');
+      // Split at parenthesized refs followed by circled numbers
+      text = text.replace(/\)\s+([①②③④⑤⑥⑦⑧⑨⑩❶❷❸❹❺])/g, ')\n\n$1');
+      // Split at Roman numeral chapter markers
+      text = text.replace(/\s+([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]\.)/g, '\n\n# $1');
+      result2.push(...text.split('\n'));
     } else {
       result2.push(line);
     }
