@@ -339,6 +339,18 @@ function postProcessPdfMarkdown(md: string): string {
       }
     }
 
+    // "Part 1:", "Part I:" etc. → heading
+    if (/^Part\s+(\d+|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVXvi]+)\s*[:：]/i.test(trimmed) && trimmed.length < 120) {
+      result.push('', `# ${trimmed}`, '');
+      continue;
+    }
+
+    // "1.1. 제목" → ### heading
+    if (/^\d+\.\d+\.\s/.test(trimmed) && trimmed.length < 100 && !/[,;]/.test(trimmed.slice(0, 20))) {
+      result.push('', `### ${trimmed}`, '');
+      continue;
+    }
+
     // ALL-CAPS short lines (e.g., "P R E M I U M   G U I D E")
     if (trimmed.length > 3 && trimmed.length < 80 && /^[A-Z\s]+$/.test(trimmed)) {
       result.push('', `## ${trimmed}`, '');
@@ -424,9 +436,21 @@ function postProcessPdfMarkdown(md: string): string {
 
   // Phase 1.5: Fix garbage merged headings (cover+TOC in one line)
   // "# 고용창출장려금은...CONTENTS 목차 Ⅰ." → remove (cover page artifact)
-  output = output.replace(/^#\s+.{100,}(CONTENTS|목차).+$/gm, '');
-  // Very long # headings (100+ chars) → likely garbage, downgrade to paragraph
-  output = output.replace(/^(#{1,2})\s+(.{120,})$/gm, '$2');
+  output = output.replace(/^#\s+.{30,}(CONTENTS|목차).+$/gm, '');
+  // Very long # headings (80+ chars) → likely garbage, downgrade to paragraph
+  output = output.replace(/^(#{1,2})\s+(.{80,})$/gm, '$2');
+  // Remove exact duplicate lines (adjacent)
+  const dedupLines = output.split('\n');
+  const deduped: string[] = [];
+  for (let i = 0; i < dedupLines.length; i++) {
+    const t = dedupLines[i].trim();
+    const prevT = i > 0 ? dedupLines[i-1].trim() : '';
+    if (t && t === prevT) continue; // skip duplicate
+    // Also skip near-duplicates (one is heading version of the other)
+    if (t && prevT && (prevT === `# ${t}` || prevT === `## ${t}`)) continue;
+    deduped.push(dedupLines[i]);
+  }
+  output = deduped.join('\n');
 
   // Phase 2: Remove page numbers from headings
   // "# 87 Ⅰ 고용장려금" → "# Ⅰ 고용장려금"
@@ -445,13 +469,22 @@ function postProcessPdfMarkdown(md: string): string {
   const lines2 = output.split('\n');
   const result2: string[] = [];
   for (const line of lines2) {
-    if (line.length > 200 && !line.startsWith('#') && !line.startsWith('|')) {
+    if (line.length > 150 && !line.startsWith('#') && !line.startsWith('|')) {
       // Split at Korean sentence endings followed by space
       let split = line.replace(/([다함음임됨짐요니까]\.)\s+/g, '$1\n\n');
       // Split at parenthesized references followed by new topic
       split = split.replace(/\)\s+([\d①②③④⑤⑥⑦⑧⑨⑩])/g, ')\n\n$1');
       // Split at "지원 XX" patterns after sentence end
       split = split.replace(/([다함음됨])\s+(지원|신청|문의)/g, '$1\n\n$2');
+      // Split at Part/Chapter markers
+      split = split.replace(/\s+(Part\s+\d|Part\s+[ⅠⅡⅢ]|제\d+장|제\d+절)/g, '\n\n## $1');
+      // Split at numbered section markers: "1.1." "2.3." etc.
+      split = split.replace(/\s+(\d+\.\d+\.)\s/g, '\n\n### $1 ');
+      result2.push(...split.split('\n'));
+    } else if (line.startsWith('#') && line.length > 100) {
+      // Long heading — downgrade to text and split
+      const text = line.replace(/^#{1,4}\s+/, '');
+      let split = text.replace(/([다함음임됨짐요니까]\.)\s+/g, '$1\n\n');
       result2.push(...split.split('\n'));
     } else {
       result2.push(line);
