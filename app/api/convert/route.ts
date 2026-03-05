@@ -776,7 +776,9 @@ function formatHwpTextToMarkdown(text: string): string {
     if (!inAnnotation && isTocPattern && !/착안사항|☞|◈/.test(trimmed)) {
       // Split concatenated TOC entries: "제1장 총칙제1조(목적) [필수] 7제2조..."
       // Insert newlines before each 제X장, 제X절, 제X조 pattern
-      const tocFormatted = trimmed
+      // Strip table separators first, then split on article patterns
+      const tocClean = trimmed.replace(/\|/g, ' ').replace(/---/g, '').replace(/\s+/g, ' ');
+      const tocFormatted = tocClean
         .replace(/(제\s*\d+\s*장\s*[^\d제]*)/g, '\n$1')
         .replace(/(제\s*\d+\s*절\s*[^\d제]*)/g, '\n$1')
         .replace(/(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*\[(?:필수|선택)[^\]]*\]\s*\d*)/g, '\n$1')
@@ -985,6 +987,14 @@ function finalCleanup(md: string): string {
 
   // 7. Remove standalone "| 취업규칙(안) | 취업규칙(안) |" header rows (TOC decorations)
   result = result.replace(/^\|\s*취업규칙\(안\)\s*\|\s*취업규칙\(안\)\s*\|\s*$/gm, '');
+
+  // 8. Remove trailing " |" from TOC entries (residual table cell separators)
+  result = result.replace(/^(\s+-\s+제\d+조.+?)\s*\|\s*$/gm, '$1');
+  result = result.replace(/^(\*\*제\d+장.+?)\s*\|\s*\*\*\s*$/gm, '$1**');
+  result = result.replace(/^(\*\*제\d+장\s+.+?)\s*\|\*\*\s*$/gm, '$1**');
+
+  // 9. Remove orphan "| --- | --- |" lines not adjacent to table content
+  result = result.replace(/^\|\s*---\s*\|\s*---\s*\|\s*$/gm, '');
 
   return result.trim() + '\n';
 }
