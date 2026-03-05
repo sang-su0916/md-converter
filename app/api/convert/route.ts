@@ -768,23 +768,30 @@ function formatHwpTextToMarkdown(text: string): string {
 
     // Article headings: 제1조(목적) ...body
     // Also handle mid-line article: "...이 규칙이 정하는 바에 따른다.제3조(사원의 정의)..."
-    const embeddedArticle = trimmed.match(/^(.+?)(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*.*)$/);
-    if (embeddedArticle && !trimmed.startsWith('제') && /제\s*\d+\s*조/.test(trimmed)) {
-      const before = embeddedArticle[1].trim();
-      const articlePart = embeddedArticle[2].trim();
-      if (before) result.push(before);
-      // Re-process the article part
-      const subMatch = articlePart.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
-      if (subMatch) {
-        const title = subMatch[1].replace(/\s+/g, ' ').trim();
-        const body = (subMatch[2] || '').trim();
-        result.push('', `#### ${title}`, '');
-        if (body) result.push(formatArticleBody(body));
-      } else {
-        result.push('', `#### ${articlePart}`, '');
+    // But NOT inside annotations (착안사항) — law references like "근로기준법 제17조(명시)" should stay as text
+    if (!inAnnotation && !trimmed.startsWith('제') && /제\s*\d+\s*조\s*\([^)]+\)/.test(trimmed)) {
+      const embeddedArticle = trimmed.match(/^(.+?)(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*.*)$/);
+      if (embeddedArticle) {
+        const before = embeddedArticle[1].trim();
+        const articlePart = embeddedArticle[2].trim();
+        // Only split if the "before" part looks like end of a clause (ends with 다, 함, 음, etc.)
+        // and the article part looks like a standalone article heading (not a law reference)
+        const isLawRef = /법|령|규칙|시행령/.test(before.slice(-10));
+        if (!isLawRef) {
+          if (before) result.push(before);
+          const subMatch = articlePart.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
+          if (subMatch) {
+            const title = subMatch[1].replace(/\s+/g, ' ').trim();
+            const body = (subMatch[2] || '').trim();
+            result.push('', `#### ${title}`, '');
+            if (body) result.push(formatArticleBody(body));
+          } else {
+            result.push('', `#### ${articlePart}`, '');
+          }
+          lastWasHeading = true;
+          continue;
+        }
       }
-      lastWasHeading = true;
-      continue;
     }
 
     const articleMatch = trimmed.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
@@ -931,12 +938,12 @@ function formatArticleBody(body: string): string {
   // Split on clause markers (①②③...)
   let result = body
     .replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)/g, '\n\n$1')
-    .replace(/(\d+\.)\s/g, '\n$1 ')
-    .replace(/([가나다라마바사아자차카타파하]\.)\s/g, '\n  $1 ')
+    .replace(/\s(\d+\.)\s/g, '\n$1 ')
     .trim();
 
-  // Also split embedded article headings (제X조 appearing mid-text)
-  result = result.replace(/(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))/g, '\n\n#### $1\n');
+  // Korean letter list items (가. 나. 다.) — ONLY at start of segment after newline
+  // NOT mid-sentence like "하여야 한다." or "있다."
+  result = result.replace(/\n([가나다라마바사아자차카타파하]\.)\s/g, '\n  $1 ');
 
   const lines = result.split('\n');
   const formatted: string[] = [];
@@ -957,11 +964,11 @@ function finalCleanup(md: string): string {
   // 1. Split ☞ in annotations onto new lines (within blockquotes)
   result = result.replace(/(\s)(☞\s*\(참고\))/g, '\n> $2');
 
-  // 2. Remove empty table cells: | | patterns
-  result = result.replace(/^\|\s*\|\s*$/gm, '');
+  // 2. Remove empty table rows: lines with only | and whitespace
+  result = result.replace(/^(?:\|\s*)+\|\s*$/gm, '');
 
   // 3. Remove orphan table separators without content
-  result = result.replace(/^\|\s*---\s*\|\s*$/gm, '');
+  result = result.replace(/^(?:\|\s*---\s*)+\|\s*$/gm, '');
 
   // 4. Clean up consecutive empty lines
   result = result.replace(/\n{4,}/g, '\n\n\n');
