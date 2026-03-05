@@ -51,7 +51,7 @@ const RENDER_BACKEND = process.env.RENDER_BACKEND_URL || 'https://md-converter-g
 /**
  * Proxy conversion to Render backend (Docker with full Python tools)
  */
-async function proxyToRender(file: File): Promise<Response> {
+async function proxyToRender(file: File, ext?: string): Promise<Response> {
   const formData = new FormData();
   formData.append('file', file);
 
@@ -61,7 +61,22 @@ async function proxyToRender(file: File): Promise<Response> {
     signal: AbortSignal.timeout(180000), // 3min timeout for cold start
   });
 
-  const data = await res.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = await res.json() as any;
+
+  // Post-process Render response for PDF and HTML
+  if (data.markdown && ext) {
+    if (PDF_EXTENSIONS.includes(ext)) {
+      data.markdown = postProcessPdfMarkdown(data.markdown);
+      data.lineCount = data.markdown.split('\n').length;
+      data.charCount = data.markdown.length;
+    } else if (HTML_EXTENSIONS.includes(ext)) {
+      data.markdown = postProcessHtmlMarkdown(data.markdown);
+      data.lineCount = data.markdown.split('\n').length;
+      data.charCount = data.markdown.length;
+    }
+  }
+
   return jsonWithCors(data, res.status);
 }
 
@@ -1372,7 +1387,7 @@ export async function POST(request: NextRequest) {
       tempHtmlPath = join(tempDir, `${tempId}.html`);
       const hwpToolAvailable = !!hwp5htmlBin;
       if (!hwpToolAvailable) {
-        return proxyToRender(file);
+        return proxyToRender(file, ext);
       }
 
       // Strategy: hwp5html → custom HTML text extraction → formatHwpTextToMarkdown
@@ -1447,7 +1462,7 @@ export async function POST(request: NextRequest) {
       _pdfDebug = `path=convertPdfToMarkdown,headings=${pdfHeadings},lines=${markdown.split('\n').length}`;
       // PDF 로컬 변환 실패 시 Render 백엔드로 프록시
       if (!markdown || markdown.trim().length === 0) {
-        return proxyToRender(file);
+        return proxyToRender(file, ext);
       }
     } else if (HTML_EXTENSIONS.includes(ext)) {
       const htmlContent = await readFile(tempPath, 'utf-8');
@@ -1462,7 +1477,7 @@ export async function POST(request: NextRequest) {
       markdown = await convertWithOfficeParser(tempPath);
     } else {
       // Images, audio, zip etc. - proxy to Render backend
-      return proxyToRender(file);
+      return proxyToRender(file, ext);
     }
 
     // Final post-processing: add headings for PDF and HTML regardless of code path
