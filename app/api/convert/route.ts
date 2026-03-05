@@ -1335,7 +1335,12 @@ export async function POST(request: NextRequest) {
       // HTML은 Vercel 로컬에서 직접 처리 (Render HTML 변환 품질 낮음)
       const ext = file.name.lastIndexOf('.') >= 0 ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
       if (HTML_EXTENSIONS.includes(ext)) {
-        // Fall through to DIRECT MODE for HTML
+        const htmlBytes = await file.arrayBuffer();
+        const htmlContent = new TextDecoder('utf-8').decode(htmlBytes);
+        let markdown = await convertHtmlToMarkdown(htmlContent);
+        markdown = postProcessHtmlMarkdown(markdown);
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
       } else {
         // PDF and others → Render
         const renderFormData = new FormData();
