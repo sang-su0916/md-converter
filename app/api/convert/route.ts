@@ -177,6 +177,56 @@ function convertCsvToMarkdown(csvContent: string): string {
 }
 
 /**
+ * Convert markdown tables to plain text
+ * Extracts cell content and converts to newline-separated text
+ * Used for HWP layout tables that shouldn't be tables in markdown
+ */
+function convertMarkdownTablesToText(markdown: string): string {
+  const lines = markdown.split('\n');
+  const result: string[] = [];
+  let inTable = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Table row: | cell | cell |
+    if (/^\|.*\|$/.test(trimmed)) {
+      // Skip separator rows: | --- | --- |
+      if (/^\|[\s\-:]+(\|[\s\-:]+)+\|?$/.test(trimmed)) {
+        continue;
+      }
+      
+      inTable = true;
+      // Extract cell contents
+      const cells = trimmed
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+      
+      // Add each non-empty cell as a separate line
+      for (const cell of cells) {
+        if (cell) {
+          result.push(cell);
+        }
+      }
+      continue;
+    }
+    
+    // Not a table row
+    if (inTable && trimmed) {
+      // Add paragraph break after table
+      result.push('');
+      inTable = false;
+    }
+    result.push(line);
+  }
+  
+  return result.join('\n');
+}
+
+/**
  * Extract clean text from HWP-generated HTML
  * Strips table layout markup and preserves content structure
  * This avoids markitdown's faithful table conversion which makes layout tables unreadable
@@ -799,7 +849,7 @@ export async function POST(request: NextRequest) {
         conversionMethod = `hwp5html failed: ${e instanceof Error ? e.message : String(e)}`;
       }
 
-      // Method 2: hwp5html → markitdown → postProcessHwpMarkdown
+      // Method 2: hwp5html → markitdown → convertMarkdownTablesToText → formatHwpTextToMarkdown
       try {
         if (!htmlSize) {
           await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
@@ -808,9 +858,11 @@ export async function POST(request: NextRequest) {
         if (markitdownBin) {
           const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
           if (stdout.trim().length > 500) {
-            conversionMethod = 'hwp5html→markitdown';
-            const markdown = postProcessHwpMarkdown(stdout);
-            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length } });
+            conversionMethod = 'hwp5html→markitdown→tableToText';
+            // Convert markdown tables to plain text, then apply HWP formatter
+            const textWithoutTables = convertMarkdownTablesToText(stdout);
+            const markdown = formatHwpTextToMarkdown(textWithoutTables);
+            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length, textSize: textWithoutTables.length } });
           }
         }
       } catch { /* markitdown failed */ }
