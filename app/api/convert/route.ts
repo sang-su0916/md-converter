@@ -529,40 +529,23 @@ function postProcessPdfMarkdown(md: string): string {
   // Fix double headings: "# \n\n## title" → just "## title"
   output = output.replace(/^#\s*\n+(?=##)/gm, '');
 
-  // Phase 7: Ensure document has a proper title
-  let linesPhase7 = output.split('\n');
+  // Phase 7: Ensure document has a proper title (simple and direct)
+  // If no # heading in first 5 lines, promote first ## to #
+  const firstLines = output.split('\n').slice(0, 10);
+  const hasEarlyH1 = firstLines.some(l => l.trim().startsWith('# '));
   
-  // Find first # heading position
-  let firstH1Idx = linesPhase7.findIndex(l => l.trim().startsWith('# '));
-  
-  if (firstH1Idx === -1 || firstH1Idx > 5) {
-    // No # title or too far down — promote first ##
-    const firstH2Idx = linesPhase7.findIndex(l => l.trim().startsWith('## '));
-    if (firstH2Idx >= 0) {
-      const h2Text = linesPhase7[firstH2Idx].replace(/^##\s+/, '').trim();
-      if (h2Text.length < 120) {
-        linesPhase7[firstH2Idx] = `# ${h2Text}`;
-      }
-    } else {
-      // No ## either — extract first non-heading text as title
-      for (let i = 0; i < Math.min(5, linesPhase7.length); i++) {
-        const t = linesPhase7[i].trim();
-        if (t && !t.startsWith('#') && t.length > 10) {
-          const title = t.slice(0, 80).trim();
-          linesPhase7.unshift(`# ${title}`, '');
-          break;
-        }
-      }
-    }
-  } else {
-    // Has # title but check if too long
-    const h1Text = linesPhase7[firstH1Idx].trim();
-    if (h1Text.length > 100) {
-      linesPhase7[firstH1Idx] = h1Text.slice(0, 90).trim();
+  if (!hasEarlyH1) {
+    // Find and promote first ## to #
+    const h2Match = output.match(/^##\s+(.{1,100})\s*$/m);
+    if (h2Match) {
+      const h2Line = h2Match[0];
+      const h2Text = h2Match[1].trim();
+      output = output.replace(h2Line, `# ${h2Text}`);
     }
   }
   
-  output = linesPhase7.join('\n');
+  // Truncate overly long # headings (anywhere in doc)
+  output = output.replace(/^#\s+(.{90,})\s*$/gm, (match, text) => `# ${text.slice(0, 80).trim()}`);
 
   return output.replace(/\n{4,}/g, '\n\n\n').replace(/\f/g, '').trim() + '\n';
 }
