@@ -1494,7 +1494,8 @@ export async function POST(request: NextRequest) {
       markdown = postProcessHtmlMarkdown(markdown);
     }
 
-    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _v: 'v7-postprocess', _ext: ext });
+    const headingsInResult = markdown.split('\n').filter((l: string) => l.startsWith('#')).length;
+    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _v: 'v10-FINAL', _ext: ext, _headings: headingsInResult, _isPDF: PDF_EXTENSIONS.includes(ext) });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     if (message.includes('timeout')) return jsonWithCors({ error: '변환 시간이 초과되었습니다.' }, 504);
