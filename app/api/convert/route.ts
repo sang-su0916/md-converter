@@ -28,6 +28,7 @@ const SUPPORTED_EXTENSIONS = [
   '.txt', '.md', '.rst', '.log',
 ];
 
+const EPUB_EXTENSIONS = ['.epub'];
 const HWP_EXTENSIONS = ['.hwp', '.hwpx'];
 const TEXT_EXTENSIONS = ['.txt', '.md', '.rst', '.log'];
 const PDF_EXTENSIONS = ['.pdf'];
@@ -82,7 +83,15 @@ async function proxyToRender(file: File, ext?: string): Promise<Response> {
       data.charCount = data.markdown.length;
       data._v = 'v9-render-html';
       data._ext = ext;
+    } else if (EPUB_EXTENSIONS.includes(ext)) {
+      data.markdown = postProcessEpubMarkdown(data.markdown);
+      data.lineCount = data.markdown.split('\n').length;
+      data.charCount = data.markdown.length;
+      data._v = 'v9-render-epub';
+      data._ext = ext;
     }
+    // Apply code block language detection to all Render responses
+    data.markdown = detectAndAddCodeBlockLanguages(data.markdown);
   }
 
   return jsonWithCors(data, res.status);
@@ -673,6 +682,171 @@ function postProcessHtmlMarkdown(md: string): string {
   }
 
   return htmlOutput.replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+}
+
+/**
+ * Detect code block language from content and add appropriate tag
+ */
+function detectLanguage(code: string): string {
+  const trimmed = code.trim();
+  const firstLine = trimmed.split('\n')[0].trim();
+
+  // JSON detection
+  if (/^\{[\s\S]*\}$/.test(trimmed) || /^\[[\s\S]*\]$/.test(trimmed)) {
+    try { JSON.parse(trimmed); return 'json'; } catch { /* not valid json */ }
+  }
+  if (firstLine.startsWith('{') || firstLine.startsWith('"') && firstLine.includes(':')) return 'json';
+
+  // YAML/TOON detection (key: value patterns without braces)
+  if (/^[\w가-힣]+:\s/.test(firstLine) && !firstLine.startsWith('{')) {
+    if (/\[\d+\]/.test(code) || /\{[\w,]+\}:/.test(code)) return 'yaml';
+    if (/^\w+:\s*\n\s+\w+:/.test(trimmed)) return 'yaml';
+    return 'yaml';
+  }
+
+  // Bash/Shell detection
+  if (firstLine.startsWith('#!') || firstLine.startsWith('$ ') ||
+      /^(sudo|npm|pip|cd|ls|mkdir|git|docker|curl|wget|cat|echo|export|chmod|ssh|scp)\s/.test(firstLine) ||
+      /^(claude|npx|bun|yarn|pnpm|brew|apt|yum|dnf|pacman)\s/.test(firstLine)) return 'bash';
+
+  // JavaScript/TypeScript
+  if (/^(const|let|var|function|import|export|class|interface|type)\s/.test(firstLine) ||
+      /^(async|await|return)\s/.test(firstLine) ||
+      /=>\s*[\{(]/.test(firstLine)) {
+    return (code.includes(': string') || code.includes(': number') || code.includes(': boolean') ||
+            code.includes('interface ') || code.includes('type ') && code.includes('= {'))
+      ? 'typescript' : 'javascript';
+  }
+
+  // Python
+  if (/^(def |class |import |from |if __name__|print\(|#\s)/.test(firstLine) ||
+      /^\s*(elif|except|finally|lambda|async def)\s/.test(code)) return 'python';
+
+  // HTML
+  if (firstLine.startsWith('<') && (/<!DOCTYPE|<html|<div|<head|<body|<p |<span|<table/i.test(firstLine))) return 'html';
+
+  // CSS
+  if (/^[\.\#\w][\w-]*\s*\{/.test(firstLine) || /^@(media|import|keyframes|charset)/.test(firstLine)) return 'css';
+
+  // SQL
+  if (/^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH)\s/i.test(firstLine)) return 'sql';
+
+  // Dockerfile
+  if (/^(FROM|RUN|COPY|CMD|ENTRYPOINT|WORKDIR|ENV|EXPOSE|ARG|LABEL)\s/.test(firstLine)) return 'dockerfile';
+
+  // XML
+  if (firstLine.startsWith('<?xml') || (firstLine.startsWith('<') && firstLine.endsWith('>'))) return 'xml';
+
+  // TOML
+  if (/^\[[\w.]+\]$/.test(firstLine) && !code.includes('=')) return 'toml';
+  if (/^\[[\w.]+\]$/.test(firstLine) && code.includes('=')) return 'toml';
+
+  // INI/Config
+  if (/^\[[\w\s]+\]$/.test(firstLine) && code.includes('=')) return 'ini';
+
+  // Markdown (nested)
+  if (firstLine.startsWith('# ') || firstLine.startsWith('## ') || firstLine.startsWith('- [')) return 'markdown';
+
+  // Plain text patterns (Korean prose without code-like syntax)
+  if (/^["']/.test(firstLine) && /[.!?]["']?$/.test(trimmed.split('\n').pop() || '')) return '';
+
+  return '';
+}
+
+/**
+ * Add language tags to fenced code blocks that lack them
+ */
+function detectAndAddCodeBlockLanguages(md: string): string {
+  return md.replace(/```\n([\s\S]*?)```/g, (match, content) => {
+    const lang = detectLanguage(content);
+    if (lang) {
+      return '```' + lang + '\n' + content + '```';
+    }
+    return match;
+  });
+}
+
+/**
+ * Post-process EPUB markdown: fix common EPUB conversion artifacts
+ * - Remove duplicate titles
+ * - Clean EPUB internal links (text/ch0XX.xhtml) from TOC
+ * - Add code block language tags
+ * - Fix broken table separators (em-dashes → hyphens)
+ * - Clean EPUB metadata (UUID, xhtml references)
+ * - Fix/remove Obsidian wikilinks
+ */
+function postProcessEpubMarkdown(md: string): string {
+  let result = md;
+
+  // 1. Remove EPUB metadata lines (UUID, language, date, identifier)
+  result = result.replace(/^\*\*Identifier:\*\*\s*urn:uuid:.*$/gm, '');
+  result = result.replace(/^\*\*Language:\*\*\s*[\w-]+\s*$/gm, '');
+  result = result.replace(/^\*\*Date:\*\*\s*\d{4}-\d{2}-\d{2}T[^\n]*$/gm, '');
+  result = result.replace(/^\*\*Title:\*\*\s*[^\n]*$/gm, '');
+
+  // 2. Remove duplicate # titles (keep only the first meaningful one)
+  const titleLines = result.match(/^# .+$/gm);
+  if (titleLines && titleLines.length > 1) {
+    // Find the best title (longest with emoji or numbering)
+    let bestIdx = 0;
+    let bestScore = 0;
+    titleLines.forEach((t, i) => {
+      let score = t.length;
+      if (/[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}]/u.test(t)) score += 50; // has emoji
+      if (/\d/.test(t)) score += 20; // has number
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    });
+    const bestTitle = titleLines[bestIdx];
+    let kept = false;
+    result = result.replace(/^# .+$/gm, (match) => {
+      if (!kept && match === bestTitle) { kept = true; return match; }
+      // Remove if it's a duplicate (similar content)
+      const matchCore = match.slice(2).replace(/[\s\d🎯📋🤔💡📖📊🎨👶⚠️📚🎯📝🔗]/gu, '').trim();
+      const bestCore = bestTitle.slice(2).replace(/[\s\d🎯📋🤔💡📖📊🎨👶⚠️📚🎯📝🔗]/gu, '').trim();
+      if (matchCore === bestCore || match.includes(bestTitle.slice(2, 20))) return '';
+      return match;
+    });
+  }
+
+  // 3. Remove EPUB internal link TOC (links containing text/chXXX.xhtml)
+  // Full TOC entries with EPUB paths
+  result = result.replace(/^\s*\d+\.\s+\[[\d.]*\s*[^\]]*\]\(text\/ch\d+\.xhtml[^)]*\)\s*$/gm, '');
+  // Sub-entries
+  result = result.replace(/^\s+\d+\.\s+\[[\d.]*\s*[^\]]*\]\(text\/ch\d+\.xhtml[^)]*\)\s*$/gm, '');
+  // Navigation links (Title Page, Table of Contents with EPUB paths)
+  result = result.replace(/^\d+\.\s+\[(?:Title Page|Table of Contents)\]\([^)]*\)\s*$/gm, '');
+  // Anchor-only TOC link: [Table of Contents](#toc)
+  result = result.replace(/^\d+\.\s+\[Table of Contents\]\(#toc\)\s*$/gm, '');
+
+  // 4. Convert Obsidian wikilinks in body TOC to standard markdown anchors
+  // [[#Section Name]] → [Section Name](#section-name)
+  result = result.replace(/\[\[#([^\]]+)\]\]/g, (_, section) => {
+    const anchor = section.toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w가-힣-]/g, '');
+    return `[${section}](#${anchor})`;
+  });
+
+  // 5. Fix wikilinks with aliases: [[Page|Display]] → Display
+  result = result.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2');
+  // Bare wikilinks: [[PageName]] → PageName
+  result = result.replace(/\[\[([^\]]+)\]\]/g, '$1');
+
+  // 6. Fix broken table separators: |——| or |––| → |---|
+  result = result.replace(/^\|[\s—–|-]+\|$/gm, (match) => {
+    return match.replace(/[—–]+/g, '---');
+  });
+
+  // 7. Add code block language tags
+  result = detectAndAddCodeBlockLanguages(result);
+
+  // 8. Clean up consecutive blank lines
+  result = result.replace(/\n{4,}/g, '\n\n\n');
+
+  // 9. Remove empty lines at document start
+  result = result.replace(/^\n+/, '');
+
+  return result.trim() + '\n';
 }
 
 /**
@@ -2017,6 +2191,8 @@ export async function POST(request: NextRequest) {
         if (data.markdown) {
           if (PDF_EXTENSIONS.includes(ext)) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
+          } else if (EPUB_EXTENSIONS.includes(ext)) {
+            data.markdown = postProcessEpubMarkdown(data.markdown);
           } else if (['.docx', '.doc', '.pptx', '.ppt', '.hwp'].includes(ext)) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
             // HWP: additional post-processing for proxy output format
@@ -2029,6 +2205,8 @@ export async function POST(request: NextRequest) {
           } else if (ext === '.txt') {
             data.markdown = postProcessTxtMarkdown(data.markdown, file.name);
           }
+          // Apply code block language detection to all formats
+          data.markdown = detectAndAddCodeBlockLanguages(data.markdown);
           data.lineCount = data.markdown.split('\n').length;
           data.charCount = data.markdown.length;
         }
@@ -2211,12 +2389,17 @@ export async function POST(request: NextRequest) {
       return proxyToRender(file, ext);
     }
 
-    // Final post-processing: add headings for PDF and HTML regardless of code path
+    // Final post-processing: add headings for PDF, HTML, EPUB regardless of code path
     if (PDF_EXTENSIONS.includes(ext)) {
       markdown = postProcessPdfMarkdown(markdown);
     } else if (HTML_EXTENSIONS.includes(ext)) {
       markdown = postProcessHtmlMarkdown(markdown);
+    } else if (EPUB_EXTENSIONS.includes(ext)) {
+      markdown = postProcessEpubMarkdown(markdown);
     }
+
+    // Apply code block language detection to all formats
+    markdown = detectAndAddCodeBlockLanguages(markdown);
 
     const headingsInResult = markdown.split('\n').filter((l: string) => l.startsWith('#')).length;
     return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _v: 'v10-FINAL', _ext: ext, _headings: headingsInResult, _isPDF: PDF_EXTENSIONS.includes(ext) });
