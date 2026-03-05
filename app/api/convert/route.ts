@@ -232,6 +232,132 @@ function formatPdfText(text: string): string {
     .trim() + '\n';
 }
 
+/**
+ * Post-process PDF markdown: add headings regardless of extraction method
+ * Applied AFTER all PDF processing (markitdown, pdf-parse, etc.)
+ */
+function postProcessPdfMarkdown(md: string): string {
+  const lines = md.split('\n');
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) { result.push(''); continue; }
+
+    // Skip lines already formatted as headings
+    if (trimmed.startsWith('#')) { result.push(lines[i]); continue; }
+
+    // Form feed characters → page breaks (remove)
+    if (trimmed === '\f' || trimmed === '') { result.push(''); continue; }
+
+    // Roman numeral headings: Ⅰ. Ⅱ. Ⅲ. etc.
+    if (/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][.\s]/.test(trimmed) && trimmed.length < 120) {
+      // Remove trailing dots (TOC separators)
+      const clean = trimmed.replace(/\s*[·.]{5,}\s*\d*\s*$/, '').trim();
+      result.push('', `# ${clean}`, '');
+      continue;
+    }
+
+    // CONTENTS/목차
+    if (/^(CONTENTS|목차|차례)/i.test(trimmed) && trimmed.length < 100) {
+      result.push('', `# ${trimmed}`, '');
+      continue;
+    }
+
+    // Numeric headings: "1. 제목" (short, no commas)
+    if (/^\d+\.\s/.test(trimmed) && trimmed.length < 80 && !/[,;]/.test(trimmed)) {
+      const clean = trimmed.replace(/\s*[·.]{5,}\s*\d*\s*$/, '').trim();
+      result.push('', `## ${clean}`, '');
+      continue;
+    }
+
+    // Korean chapter/section/article
+    if (/^제\s*\d+\s*장/.test(trimmed) && trimmed.length < 80) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+    if (/^제\s*\d+\s*절/.test(trimmed) && trimmed.length < 80) {
+      result.push('', `### ${trimmed}`, '');
+      continue;
+    }
+    if (/^제\s*\d+\s*조[\s(]/.test(trimmed) && trimmed.length < 100) {
+      result.push('', `#### ${trimmed}`, '');
+      continue;
+    }
+
+    // Short standalone lines ending with topic markers (은/는/의/금)
+    if (trimmed.length > 3 && trimmed.length < 60 && /[은는금]$/.test(trimmed)) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '' || lines[i - 1].trim() === '\f';
+      const nextBlank = i === lines.length - 1 || lines[i + 1].trim() === '';
+      if (prevBlank && nextBlank) {
+        result.push('', `## ${trimmed}`, '');
+        continue;
+      }
+    }
+
+    // ALL-CAPS short lines
+    if (trimmed.length > 3 && trimmed.length < 50 && /^[A-Z\s]+$/.test(trimmed)) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Bullet markers → list
+    if (/^[○●■□▶▷◆◇·•]\s/.test(trimmed)) {
+      result.push(`- ${trimmed.slice(2)}`);
+      continue;
+    }
+
+    // Circled numbers
+    if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) {
+      result.push('', trimmed);
+      continue;
+    }
+
+    result.push(trimmed);
+  }
+
+  return result.join('\n').replace(/\n{4,}/g, '\n\n\n').replace(/\f/g, '').trim() + '\n';
+}
+
+/**
+ * Post-process HTML markdown: add headings for TOPIC, bold sections, etc.
+ * Applied AFTER turndown conversion
+ */
+function postProcessHtmlMarkdown(md: string): string {
+  const lines = md.split('\n');
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    // TOPIC XX → heading
+    if (/^TOPIC\s+\d+/i.test(trimmed)) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // FROM THE CEO, NEWSLETTER etc.
+    if (/^(FROM THE|NEWSLETTER|SPRING|SUMMER|FALL|WINTER)\s/i.test(trimmed) && trimmed.length < 60) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Standalone bold lines → section headings
+    if (/^\*\*[^*]+\*\*$/.test(trimmed) && trimmed.length < 100 && !trimmed.includes('http')) {
+      const title = trimmed.replace(/\*\*/g, '');
+      const prevBlank = i === 0 || lines[i - 1].trim() === '';
+      if (prevBlank && title.length > 3 && title.length < 80) {
+        result.push('', `## ${title}`, '');
+        continue;
+      }
+    }
+
+    result.push(lines[i]);
+  }
+
+  return result.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+}
+
 async function convertWithOfficeParser(filePath: string): Promise<string> {
   const officeparser = await import('officeparser');
   const result = await officeparser.parseOffice(filePath);
@@ -1339,7 +1465,14 @@ export async function POST(request: NextRequest) {
       return proxyToRender(file);
     }
 
-    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _pdfDebug });
+    // Final post-processing: add headings for PDF and HTML regardless of code path
+    if (PDF_EXTENSIONS.includes(ext)) {
+      markdown = postProcessPdfMarkdown(markdown);
+    } else if (HTML_EXTENSIONS.includes(ext)) {
+      markdown = postProcessHtmlMarkdown(markdown);
+    }
+
+    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     if (message.includes('timeout')) return jsonWithCors({ error: '변환 시간이 초과되었습니다.' }, 504);
