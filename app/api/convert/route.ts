@@ -1915,7 +1915,8 @@ export async function POST(request: NextRequest) {
         plainTextSize = plainText.length;
         if (plainText.trim().length > 500) {
           conversionMethod = 'hwp5html→extractText';
-          const markdown = formatHwpTextToMarkdown(plainText);
+          let markdown = formatHwpTextToMarkdown(plainText);
+          markdown = postProcessHwpFinal(markdown);
           return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret4-L1415", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, plainTextSize } });
         }
         conversionMethod = 'hwp5html→extractText (too short, trying next)';
@@ -1938,6 +1939,7 @@ export async function POST(request: NextRequest) {
             let markdown = formatHwpTextToMarkdown(textWithoutTables);
             // Extract field headings from table rows
             markdown = extractTableFieldHeadings(markdown);
+            markdown = postProcessHwpFinal(markdown);
             return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret5-L1435", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length, textSize: textWithoutTables.length } });
           }
         }
@@ -1950,6 +1952,7 @@ export async function POST(request: NextRequest) {
           conversionMethod = 'hwp5txt';
           let markdown = formatHwpTextToMarkdown(hwpText);
           markdown = extractTableFieldHeadings(markdown);
+          markdown = postProcessHwpFinal(markdown);
           return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret6-L1446", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, hwp5txtSize: hwpText.length, htmlSize, plainTextSize } });
         }
       } catch { /* hwp5txt also failed */ }
