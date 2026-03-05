@@ -39,6 +39,25 @@ const ENV = {
   PATH: `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}`,
 };
 
+const RENDER_BACKEND = process.env.RENDER_BACKEND_URL || 'https://md-converter-ghdf.onrender.com';
+
+/**
+ * Proxy conversion to Render backend (Docker with full Python tools)
+ */
+async function proxyToRender(file: File): Promise<Response> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${RENDER_BACKEND}/api/convert`, {
+    method: 'POST',
+    body: formData,
+    signal: AbortSignal.timeout(180000), // 3min timeout for cold start
+  });
+
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
+}
+
 let markitdownAvailable: boolean | null = null;
 
 async function checkMarkitdown(): Promise<string | null> {
@@ -239,7 +258,8 @@ export async function POST(request: NextRequest) {
       let hwpToolAvailable = false;
       try { await execFileAsync('test', ['-f', hwp5htmlBin]); hwpToolAvailable = true; } catch { /* */ }
       if (!hwpToolAvailable) {
-        return NextResponse.json({ error: `HWP 파일은 Render 서버에서만 변환 가능합니다.\n\nRender: https://md-converter-ghdf.onrender.com` }, { status: 400 });
+        // Proxy to Render backend (has hwp5html/hwp5txt in Docker)
+        return proxyToRender(file);
       }
       try {
         await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
@@ -290,7 +310,8 @@ export async function POST(request: NextRequest) {
     } else if (OFFICE_EXTENSIONS.includes(ext)) {
       markdown = await convertWithOfficeParser(tempPath);
     } else {
-      return NextResponse.json({ error: `이 파일 형식(${ext})은 Render 서버에서만 변환 가능합니다.` }, { status: 400 });
+      // Images, audio, zip etc. - proxy to Render backend
+      return proxyToRender(file);
     }
 
     return NextResponse.json({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });

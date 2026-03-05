@@ -427,21 +427,21 @@ export default function Home() {
             <div style={{
               display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16,
             }}>
-              <a href="https://md-converter-drab.vercel.app" style={{
+              <a href="https://md-converter-ghdf.onrender.com" style={{
                 background: 'rgba(108,99,255,0.08)', borderRadius: 10, padding: '14px 16px',
                 border: '1px solid rgba(108,99,255,0.2)', textDecoration: 'none', display: 'block',
               }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#6c63ff', marginBottom: 4 }}>🌐 웹 서버 (Vercel)</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>PDF · DOCX · XLSX · HTML · CSV · TXT</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, opacity: 0.7 }}>맥미니 꺼져도 항상 사용 가능</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#6c63ff', marginBottom: 4 }}>🌐 메인 서버 (Render)</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>PDF · DOCX · <strong style={{ color: '#a855f7' }}>HWP</strong> · PPTX · 이미지(OCR) · 오디오(STT) 등 20종+</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, opacity: 0.7 }}>항상 사용 가능 · Docker 환경</div>
               </a>
-              <a href="http://100.64.56.84:3100" style={{
+              <a href="https://md-converter-drab.vercel.app" style={{
                 background: 'rgba(34,197,94,0.08)', borderRadius: 10, padding: '14px 16px',
                 border: '1px solid rgba(34,197,94,0.2)', textDecoration: 'none', display: 'block',
               }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#22c55e', marginBottom: 4 }}>🖥️ 로컬 서버 (맥미니)</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>위 전부 + <strong style={{ color: '#a855f7' }}>HWP</strong> · 이미지(OCR) · 오디오(STT)</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, opacity: 0.7 }}>맥미니 켜져 있을 때 사용 가능</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#22c55e', marginBottom: 4 }}>🚀 미러 서버 (Vercel)</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>전 포맷 지원 (특수 포맷은 백엔드 자동 연결)</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, opacity: 0.7 }}>빠른 응답 · CDN 가속</div>
               </a>
             </div>
 
@@ -534,8 +534,8 @@ export default function Home() {
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {[
-                    { q: '접속 주소에 따라 지원 포맷이 다른가요?', a: '네. 웹(Vercel) 주소에서는 PDF, DOCX, XLSX, HTML, CSV, TXT 등을 지원합니다. HWP, 이미지(OCR), 오디오(STT) 변환은 로컬 서버(맥미니)에서만 가능합니다.' },
-                    { q: 'HWP 파일을 변환하려면 어떻게 하나요?', a: '로컬 서버 주소(http://100.64.56.84:3100)로 접속하세요. 맥미니가 켜져 있을 때 HWP를 포함한 모든 포맷을 변환할 수 있습니다.' },
+                    { q: '모든 포맷이 어디서든 변환 가능한가요?', a: '네! HWP, 이미지(OCR), 오디오(STT) 등 특수 포맷도 자동으로 백엔드 서버를 통해 변환됩니다. 모든 접속 주소에서 20종+ 전 포맷을 지원합니다.' },
+                    { q: 'HWP 변환이 느린 경우는?', a: '첫 요청 시 백엔드 서버가 대기 상태에서 깨어나는 데 30초~1분 정도 걸릴 수 있습니다. 이후 요청은 빠르게 처리됩니다.' },
                     { q: '변환된 파일은 서버에 저장되나요?', a: '아니요. 변환 후 즉시 삭제됩니다. 파일은 외부로 전송되지 않습니다.' },
                     { q: '마크다운이란 무엇인가요?', a: '텍스트 기반의 경량 문서 포맷입니다. 옵시디언, 노션, GitHub 등에서 바로 사용할 수 있습니다.' },
                   ].map((item, i) => (
