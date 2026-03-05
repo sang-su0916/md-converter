@@ -70,10 +70,14 @@ async function proxyToRender(file: File, ext?: string): Promise<Response> {
       data.markdown = postProcessPdfMarkdown(data.markdown);
       data.lineCount = data.markdown.split('\n').length;
       data.charCount = data.markdown.length;
+      data._v = 'v8-render-pdf';
+      data._ext = ext;
     } else if (HTML_EXTENSIONS.includes(ext)) {
       data.markdown = postProcessHtmlMarkdown(data.markdown);
       data.lineCount = data.markdown.split('\n').length;
       data.charCount = data.markdown.length;
+      data._v = 'v8-render-html';
+      data._ext = ext;
     }
   }
 
