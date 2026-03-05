@@ -530,27 +530,53 @@ function postProcessPdfMarkdown(md: string): string {
   output = output.replace(/^#\s*\n+(?=##)/gm, '');
 
   // Phase 7: Ensure document has a proper title
-  const firstHeading = output.match(/^#\s+.+$/m);
-  const firstHeadingPos = firstHeading ? output.indexOf(firstHeading[0]) : -1;
+  const linesPhase7 = output.split('\n');
+  let hasTitle = false;
   
-  if (!firstHeading || firstHeadingPos > 500) {
-    // No # heading or too far down — promote first ##
-    const firstH2 = output.match(/^##\s+(.+)$/m);
-    if (firstH2 && firstH2[1].trim().length < 100) {
-      // Replace first ## with #
-      output = output.replace(/^##\s+/, '# ');
-    } else {
-      // Use first non-heading line as title
-      const firstLine = output.split('\n').find(l => l.trim() && !l.startsWith('#') && l.trim().length > 5 && l.trim().length < 150);
-      if (firstLine) {
-        output = `# ${firstLine.trim()}\n\n${output}`;
+  // Check if first 3 lines contain a # heading
+  for (let i = 0; i < Math.min(3, linesPhase7.length); i++) {
+    if (linesPhase7[i].trim().startsWith('# ')) {
+      hasTitle = true;
+      break;
+    }
+  }
+  
+  if (!hasTitle) {
+    // Find first ## heading (skip intro lines)
+    let firstH2Idx = -1;
+    for (let i = 0; i < linesPhase7.length; i++) {
+      if (linesPhase7[i].trim().startsWith('## ')) {
+        firstH2Idx = i;
+        break;
       }
     }
-  } else if (firstHeading && firstHeading[0].length > 120) {
-    // First heading too long — promote first ##
-    const firstH2 = output.match(/^##\s+(.+)$/m);
-    if (firstH2 && firstH2[1].trim().length < 100) {
-      output = output.replace(/^##\s+/, '# ');
+    
+    if (firstH2Idx >= 0 && linesPhase7[firstH2Idx].length < 100) {
+      // Promote this ## to #
+      linesPhase7[firstH2Idx] = linesPhase7[firstH2Idx].replace(/^##\s+/, '# ');
+      output = linesPhase7.join('\n');
+    } else {
+      // No suitable ## — use first substantial non-heading line as title (truncate if needed)
+      for (let i = 0; i < Math.min(5, linesPhase7.length); i++) {
+        const t = linesPhase7[i].trim();
+        if (t && !t.startsWith('#') && t.length > 10) {
+          const title = t.length > 80 ? t.slice(0, 80).trim() : t;
+          output = `# ${title}\n\n${output}`;
+          break;
+        }
+      }
+    }
+  } else {
+    // Has # heading but might be too long — truncate if > 100 chars
+    for (let i = 0; i < Math.min(3, linesPhase7.length); i++) {
+      if (linesPhase7[i].trim().startsWith('# ')) {
+        const heading = linesPhase7[i].trim();
+        if (heading.length > 100) {
+          linesPhase7[i] = heading.slice(0, 100).trim();
+          output = linesPhase7.join('\n');
+        }
+        break;
+      }
     }
   }
 
