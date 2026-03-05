@@ -87,17 +87,31 @@ async function checkMarkitdown(): Promise<string | null> {
 }
 
 async function convertPdfToMarkdown(filePath: string): Promise<string> {
+  // Strategy 1: pdf-parse (stable on serverless)
+  try {
+    const pdfParse = (await import('pdf-parse')).default;
+    const buffer = await readFile(filePath);
+    const result = await pdfParse(buffer);
+    if (result.text && result.text.trim().length > 0) {
+      return result.text;
+    }
+  } catch (e: unknown) {
+    console.error('pdf-parse failed:', e instanceof Error ? e.message : e);
+  }
+
+  // Strategy 2: unpdf fallback
   try {
     const { extractText, getDocumentProxy } = await import('unpdf');
     const buffer = await readFile(filePath);
     const pdf = await getDocumentProxy(new Uint8Array(buffer));
     const { text } = await extractText(pdf, { mergePages: true });
-    return text || '';
+    if (text && text.trim().length > 0) return text;
   } catch (e: unknown) {
     console.error('unpdf failed:', e instanceof Error ? e.message : e);
-    // Fallback: try markitdown for PDF
-    return '';
   }
+
+  // Both failed - return empty, caller will proxy to Render
+  return '';
 }
 
 async function convertWithOfficeParser(filePath: string): Promise<string> {
@@ -899,6 +913,10 @@ export async function POST(request: NextRequest) {
     let markdown = '';
     if (PDF_EXTENSIONS.includes(ext)) {
       markdown = await convertPdfToMarkdown(tempPath);
+      // PDF 로컬 변환 실패 시 Render 백엔드로 프록시
+      if (!markdown || markdown.trim().length === 0) {
+        return proxyToRender(file);
+      }
     } else if (HTML_EXTENSIONS.includes(ext)) {
       const htmlContent = await readFile(tempPath, 'utf-8');
       markdown = await convertHtmlToMarkdown(htmlContent);
