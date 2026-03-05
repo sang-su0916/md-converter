@@ -423,6 +423,12 @@ function postProcessPdfMarkdown(md: string): string {
       continue;
     }
 
+    // Orphaned list items from PDF: ". text" or "· text" at line start
+    if (/^\.\s+"/.test(trimmed) || /^\.\s+[A-Z가-힣]/.test(trimmed)) {
+      result.push(`- ${trimmed.slice(2)}`);
+      continue;
+    }
+
     // Filled circled numbers: ❶ ❷ etc.
     if (/^[❶❷❸❹❺❻❼❽❾❿]/.test(trimmed) && trimmed.length < 120) {
       result.push('', trimmed);
