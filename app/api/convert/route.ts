@@ -681,9 +681,9 @@ function postProcessHwpFinal(md: string): string {
     result.push(line);
   }
   
-  // Phase 2: Insert metadata after title
+  // Phase 2: Insert metadata after title (only if not already present)
   let output = result.join('\n');
-  if (metaRemoved) {
+  if (metaRemoved && !output.includes('**발행**')) {
     const titleMatch = output.match(/^#\s+.+$/m);
     if (titleMatch) {
       const idx = output.indexOf(titleMatch[0]) + titleMatch[0].length;
@@ -1709,12 +1709,11 @@ function finalCleanup(md: string): string {
     /^##\s+(\d{4})\.\s*(\d{1,2})\.\s*[\n\s]*^##\s+(고용노동부|국세청|중소벤처기업부)\s*[\n\s]*^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/gm,
     '**발행**: $3 | **시행**: $1. $2. | **대상**: $4\n\n---'
   );
-  // Fallback: individual lines
+  // Fallback: individual lines (only for non-HWP paths, skip if already handled by postProcessHwpFinal)
   if (!result.includes('**발행**')) {
     result = result.replace(/^##\s+(\d{4})\.\s*(\d{1,2})\.\s*$/gm, '');
     result = result.replace(/^##\s+(고용노동부|국세청|중소벤처기업부)\s*$/gm, '');
     result = result.replace(/^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/gm, '');
-    // Insert metadata after first heading
     const titleMatch = result.match(/^#\s+.+$/m);
     if (titleMatch) {
       const titleEnd = result.indexOf(titleMatch[0]) + titleMatch[0].length;
