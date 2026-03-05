@@ -767,10 +767,13 @@ function formatHwpTextToMarkdown(text: string): string {
     }
 
     // TOC detection: line with many 제X조 references (moved up to prevent #### conversion)
-    // Skip if inside annotation block or if line starts with annotation markers
+    // TOC pattern: "제1조(목적) [필수] 7" (article + tag + PAGE NUMBER)
+    // Annotation pattern: "[필수] 취업규칙을..." (tag + DESCRIPTION)
+    // Key difference: TOC has "[필수/선택] \d+" (tag+page), annotations have "[필수/선택] text"
     const tocArticleRefs = trimmed.match(/제\d+조/g);
-    if (!inAnnotation && tocArticleRefs && tocArticleRefs.length > 2
-        && !/착안사항|☞|◈|\[필수\]|\[선택\]/.test(trimmed)) {
+    const isTocPattern = tocArticleRefs && tocArticleRefs.length > 2
+      && (trimmed.match(/\[필수[^\]]*\]\s*\d+|제\d+조\([^)]+\)\s*\d+/g) || []).length > 2;
+    if (!inAnnotation && isTocPattern && !/착안사항|☞|◈/.test(trimmed)) {
       // Split concatenated TOC entries: "제1장 총칙제1조(목적) [필수] 7제2조..."
       // Insert newlines before each 제X장, 제X절, 제X조 pattern
       const tocFormatted = trimmed
