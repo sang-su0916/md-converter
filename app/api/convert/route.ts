@@ -413,21 +413,221 @@ function postProcessHwpMarkdown(md: string): string {
     .trim() + '\n';
 }
 
+/**
+ * Comprehensive HWP text → Markdown converter
+ * Handles legal documents, general documents, and mixed content
+ */
 function formatHwpTextToMarkdown(text: string): string {
-  const lines = text.split('\n'); const result: string[] = [];
-  for (const line of lines) {
+  // Phase 1: Clean up raw text
+  let cleaned = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/^-\s*\d+\s*-\s*$/gm, '')              // Page numbers "- 7 -"
+    .replace(/\[autonumbering[^\]]*\]/g, '')          // Auto-numbering
+    .replace(/[ \t]+$/gm, '')                         // Trailing whitespace
+    .replace(/^[ \t]{20,}/gm, '')                     // Over-indented lines (layout artifacts)
+    .replace(/(\S)\s{4,}(\S)/g, '$1\n$2');            // Split text joined by large whitespace gaps
+
+  // Fix spaced-out titles: "표 준 취 업 규 칙" → "표준취업규칙"
+  cleaned = cleaned.replace(/^([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])$/gm,
+    '$1$2$3$4$5$6$7');
+  cleaned = cleaned.replace(/^([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])$/gm,
+    '$1$2$3$4$5$6');
+  cleaned = cleaned.replace(/^([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])\s([가-힣])$/gm,
+    '$1$2$3$4$5');
+  // Generic: lines of single Korean chars separated by spaces (3+ chars)
+  cleaned = cleaned.replace(/^(([가-힣])\s){2,}([가-힣])$/gm, (match) =>
+    match.replace(/\s/g, ''));
+
+  const lines = cleaned.split('\n');
+  const result: string[] = [];
+  let inAnnotation = false;    // Whether we're in a 착안사항/참고 block
+  let lastWasHeading = false;
+  let documentTitle = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed) { result.push(''); continue; }
-    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed)) result.push(`# ${trimmed}`);
-    else if (/^제\s*\d+\s*장/.test(trimmed)) result.push(`## ${trimmed}`);
-    else if (/^제\s*\d+\s*조/.test(trimmed)) result.push(`### ${trimmed}`);
-    else if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) result.push(`- ${trimmed}`);
-    else if (/^[○●■□▶▷◆◇]/.test(trimmed)) result.push(`- ${trimmed}`);
-    else if (/^[가나다라마바사아자차카타파하][\.\)]\s/.test(trimmed)) result.push(`  - ${trimmed}`);
-    else if (/^\d+[\.\)]\s/.test(trimmed)) result.push(`${trimmed}`);
-    else result.push(trimmed);
+
+    // Skip empty lines (but preserve paragraph breaks)
+    if (!trimmed) {
+      if (inAnnotation) {
+        inAnnotation = false;
+      }
+      if (result.length > 0 && result[result.length - 1] !== '') {
+        result.push('');
+      }
+      lastWasHeading = false;
+      continue;
+    }
+
+    // Skip pure page layout artifacts
+    if (/^(조\s*문\s*순\s*서|취업규칙\s*\(안\)|작성시\s*착안사항)$/.test(trimmed)) continue;
+    if (/^(일반\s*근로자용|고용노동부)$/.test(trimmed)) {
+      if (!documentTitle) continue;
+    }
+
+    // Document title detection (first substantial text)
+    if (!documentTitle && /^[가-힣]{2,}$/.test(trimmed) && trimmed.length >= 3 && trimmed.length <= 20) {
+      if (/취업규칙|근로계약|인사규정|복무규정|보수규정|급여규정/.test(trimmed)) {
+        documentTitle = trimmed;
+        result.push(`# ${trimmed}`);
+        result.push('');
+        lastWasHeading = true;
+        continue;
+      }
+    }
+
+    // Roman numeral top-level headings
+    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed)) {
+      result.push('', `# ${trimmed}`, '');
+      lastWasHeading = true;
+      continue;
+    }
+
+    // Chapter headings: 제1장 총 칙
+    if (/^제\s*\d+\s*장\s+/.test(trimmed) && trimmed.length < 50) {
+      const chapTitle = trimmed.replace(/\s+/g, ' ').trim();
+      result.push('', `## ${chapTitle}`, '');
+      lastWasHeading = true;
+      continue;
+    }
+
+    // Section headings: 제1절 인사위원회
+    if (/^제\s*\d+\s*절\s+/.test(trimmed) && trimmed.length < 50) {
+      const secTitle = trimmed.replace(/\s+/g, ' ').trim();
+      result.push('', `### ${secTitle}`, '');
+      lastWasHeading = true;
+      continue;
+    }
+
+    // Article headings: 제1조(목적) ...body
+    const articleMatch = trimmed.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
+    if (articleMatch) {
+      const title = articleMatch[1].replace(/\s+/g, ' ').trim();
+      const body = (articleMatch[2] || '').trim();
+      result.push('', `#### ${title}`, '');
+      if (body) {
+        result.push(formatArticleBody(body));
+      }
+      lastWasHeading = true;
+      continue;
+    }
+
+    // Standalone article reference without parenthetical title
+    if (/^제\s*\d+\s*조\s/.test(trimmed) && trimmed.length < 50 && !/[①②③④⑤]/.test(trimmed)) {
+      result.push('', `#### ${trimmed.replace(/\s+/g, ' ').trim()}`, '');
+      lastWasHeading = true;
+      continue;
+    }
+
+    // 착안사항 / annotation markers
+    if (/^◈\s/.test(trimmed) || /^\[필수\]/.test(trimmed) || /^\[선택\]/.test(trimmed)
+        || /^☞\s*\(참고\)/.test(trimmed) || /^착안사항/.test(trimmed)) {
+      result.push(`> ${trimmed}`);
+      inAnnotation = true;
+      continue;
+    }
+
+    // Continuation of annotation (indented or starts with specific patterns)
+    if (inAnnotation && (/^\*\s/.test(trimmed) || /^☞/.test(trimmed) || /^-\s/.test(trimmed)
+        || /^다만/.test(trimmed) || /^단,/.test(trimmed))) {
+      result.push(`> ${trimmed}`);
+      continue;
+    }
+
+    // "부 칙" or appendix
+    if (/^부\s*칙/.test(trimmed)) {
+      result.push('', `## 부칙`, '');
+      lastWasHeading = true;
+      continue;
+    }
+
+    // 별지/별첨 (appendix forms)
+    if (/^\[?별지\s*\d+\]?/.test(trimmed) || /^\[?별첨\]?/.test(trimmed)) {
+      result.push('', `### ${trimmed.replace(/[\[\]]/g, '')}`, '');
+      lastWasHeading = true;
+      continue;
+    }
+
+    // Clause markers ① ② etc. at start of line
+    if (/^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]/.test(trimmed)) {
+      result.push('');
+      result.push(trimmed);
+      inAnnotation = false;
+      continue;
+    }
+
+    // Numbered list items: 1. 2. etc.
+    if (/^\d+\.\s/.test(trimmed)) {
+      result.push(trimmed);
+      continue;
+    }
+
+    // Bullet-like markers
+    if (/^[○●■□▶▷◆◇]\s/.test(trimmed)) {
+      result.push(`- ${trimmed.slice(2)}`);
+      continue;
+    }
+
+    // Korean letter list items: 가. 나. 다.
+    if (/^[가나다라마바사아자차카타파하]\.\s/.test(trimmed)) {
+      result.push(`  - ${trimmed}`);
+      continue;
+    }
+
+    // Date line (2026. 2.)
+    if (/^\d{4}\.\s*\d{1,2}\.\s*$/.test(trimmed)) {
+      result.push(`**${trimmed}**`);
+      result.push('');
+      continue;
+    }
+
+    // TOC detection: line with many 제X조 references
+    const articleRefs = trimmed.match(/제\d+조/g);
+    if (articleRefs && articleRefs.length > 2) {
+      // Format as structured list
+      const parts = trimmed.split(/\s{2,}/);
+      for (const part of parts) {
+        const p = part.trim();
+        if (!p) continue;
+        if (/^제\d+장/.test(p)) result.push(`\n**${p}**`);
+        else if (/^제\d+절/.test(p)) result.push(`  *${p}*`);
+        else if (/^제\d+조/.test(p)) result.push(`  - ${p}`);
+        else result.push(`  ${p}`);
+      }
+      continue;
+    }
+
+    // Default: regular text
+    inAnnotation = false;
+    result.push(trimmed);
   }
-  return result.join('\n');
+
+  return result.join('\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim() + '\n';
+}
+
+/**
+ * Format article body text (after the article title)
+ * Handles clause markers, sub-items, and paragraph structure
+ */
+function formatArticleBody(body: string): string {
+  // Split on clause markers (①②③...)
+  let result = body
+    .replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)/g, '\n\n$1')
+    .replace(/\s{2,}(\d+\.)\s/g, '\n$1 ')
+    .trim();
+
+  const lines = result.split('\n');
+  const formatted: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    formatted.push(t);
+  }
+  return formatted.join('\n');
 }
 
 export async function OPTIONS() {
@@ -512,6 +712,18 @@ export async function POST(request: NextRequest) {
         // Proxy to Render backend (has hwp5html/hwp5txt in Docker)
         return proxyToRender(file);
       }
+
+      // Strategy: hwp5txt FIRST (produces cleaner, table-free text)
+      // then hwp5html + markitdown as fallback
+      try {
+        const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
+        if (hwpText && hwpText.trim().length > 100) {
+          const markdown = formatHwpTextToMarkdown(hwpText);
+          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+        }
+      } catch { /* hwp5txt failed, try hwp5html */ }
+
+      // Fallback: hwp5html → markitdown/turndown → postProcess
       try {
         await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
         const markitdownBin = await checkMarkitdown();
@@ -525,14 +737,8 @@ export async function POST(request: NextRequest) {
         }
         return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
       } catch (hwpError: unknown) {
-        try {
-          const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
-          const markdown = formatHwpTextToMarkdown(hwpText);
-          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
-        } catch {
-          const msg = hwpError instanceof Error ? hwpError.message : 'Unknown error';
-          return jsonWithCors({ error: `HWP 변환 오류: ${msg}` }, 500);
-        }
+        const msg = hwpError instanceof Error ? hwpError.message : 'Unknown error';
+        return jsonWithCors({ error: `HWP 변환 오류: ${msg}` }, 500);
       }
     }
 
