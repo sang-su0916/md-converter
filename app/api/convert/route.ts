@@ -252,11 +252,23 @@ export async function POST(request: NextRequest) {
     }
 
     if (HWP_EXTENSIONS.includes(ext)) {
-      const hwp5htmlBin = join(HOME, '.local', 'bin', 'hwp5html');
-      const hwp5txtBin = join(HOME, '.local', 'bin', 'hwp5txt');
+      const hwpPaths = [
+        join(HOME, '.local', 'bin'),
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+      ];
+      let hwp5htmlBin = '';
+      let hwp5txtBin = '';
+      for (const dir of hwpPaths) {
+        try {
+          await execFileAsync('test', ['-f', join(dir, 'hwp5html')]);
+          hwp5htmlBin = join(dir, 'hwp5html');
+          hwp5txtBin = join(dir, 'hwp5txt');
+          break;
+        } catch { continue; }
+      }
       tempHtmlPath = join(tempDir, `${tempId}.html`);
-      let hwpToolAvailable = false;
-      try { await execFileAsync('test', ['-f', hwp5htmlBin]); hwpToolAvailable = true; } catch { /* */ }
+      const hwpToolAvailable = !!hwp5htmlBin;
       if (!hwpToolAvailable) {
         // Proxy to Render backend (has hwp5html/hwp5txt in Docker)
         return proxyToRender(file);
