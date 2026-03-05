@@ -476,6 +476,86 @@ function postProcessHtmlMarkdown(md: string): string {
 /**
  * Convert XML to structured markdown
  */
+/**
+ * Convert JSON object to structured markdown with headings
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function jsonToMarkdown(data: any, title: string = 'Data', depth: number = 0): string {
+  const result: string[] = [];
+  const prefix = '#'.repeat(Math.min(depth + 1, 4));
+  
+  if (depth === 0) {
+    result.push(`# ${title}`, '');
+  }
+  
+  if (Array.isArray(data)) {
+    data.forEach((item, idx) => {
+      if (typeof item === 'object' && item !== null) {
+        result.push(`${prefix}# 항목 ${idx + 1}`, '');
+        result.push(jsonToMarkdown(item, '', depth + 1));
+      } else {
+        result.push(`- ${String(item)}`);
+      }
+    });
+  } else if (typeof data === 'object' && data !== null) {
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'object' && value !== null) {
+        if (Array.isArray(value) && value.every(v => typeof v !== 'object')) {
+          // Simple array: key: item1, item2
+          result.push(`**${key}**: ${value.join(', ')}`, '');
+        } else {
+          result.push(`${prefix}# ${key}`, '');
+          result.push(jsonToMarkdown(value, key, depth + 1));
+        }
+      } else {
+        result.push(`**${key}**: ${String(value ?? '')}`, '');
+      }
+    }
+  } else {
+    result.push(String(data));
+  }
+  
+  return result.join('\n');
+}
+
+/**
+ * Post-process CSV markdown: add title heading
+ */
+function postProcessCsvMarkdown(md: string, filename: string): string {
+  const title = filename.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+  return `# ${title}\n\n${md}`;
+}
+
+/**
+ * Post-process TXT: detect paragraphs and potential headings
+ */
+function postProcessTxtMarkdown(md: string, filename: string): string {
+  const title = filename.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+  const lines = md.split('\n');
+  const result: string[] = [`# ${title}`, ''];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    // First non-empty line as subtitle (if short)
+    if (i === 0 && trimmed.length > 0 && trimmed.length < 60) {
+      result.push(`## ${trimmed}`, '');
+      continue;
+    }
+    // Short standalone lines after blank → section headings
+    if (trimmed.length > 3 && trimmed.length < 50 && !trimmed.endsWith('.') && !trimmed.endsWith(',')) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '';
+      const nextNonEmpty = i < lines.length - 1 && lines[i + 1]?.trim() !== '';
+      if (prevBlank && nextNonEmpty && !/^[-*•]/.test(trimmed)) {
+        result.push(`## ${trimmed}`, '');
+        continue;
+      }
+    }
+    result.push(lines[i]);
+  }
+  
+  return result.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+}
+
 function convertXmlToMarkdown(xmlContent: string): string {
   const result: string[] = [];
   // Remove XML declaration
@@ -1509,6 +1589,10 @@ export async function POST(request: NextRequest) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
           } else if (['.docx', '.doc', '.pptx', '.ppt', '.hwp'].includes(ext)) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
+          } else if (ext === '.csv') {
+            data.markdown = postProcessCsvMarkdown(data.markdown, file.name);
+          } else if (ext === '.txt') {
+            data.markdown = postProcessTxtMarkdown(data.markdown, file.name);
           }
           data.lineCount = data.markdown.split('\n').length;
           data.charCount = data.markdown.length;
@@ -1546,7 +1630,10 @@ export async function POST(request: NextRequest) {
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
 
     if (TEXT_EXTENSIONS.includes(ext)) {
-      const textContent = await readFile(tempPath, 'utf-8');
+      let textContent = await readFile(tempPath, 'utf-8');
+      if (ext === '.txt') {
+        textContent = postProcessTxtMarkdown(textContent, file.name);
+      }
       return jsonWithCors({ markdown: textContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret3-L1375", lineCount: textContent.split('\n').length, charCount: textContent.length });
     }
 
@@ -1666,10 +1753,16 @@ export async function POST(request: NextRequest) {
       markdown = convertXmlToMarkdown(xmlContent);
     } else if (ext === '.csv') {
       markdown = convertCsvToMarkdown(await readFile(tempPath, 'utf-8'));
+      markdown = postProcessCsvMarkdown(markdown, file.name);
     } else if (ext === '.json') {
       const jsonContent = await readFile(tempPath, 'utf-8');
-      try { markdown = '```json\n' + JSON.stringify(JSON.parse(jsonContent), null, 2) + '\n```\n'; }
-      catch { markdown = '```\n' + jsonContent + '\n```\n'; }
+      try {
+        const parsed = JSON.parse(jsonContent);
+        // Convert JSON to structured markdown
+        markdown = jsonToMarkdown(parsed, file.name.replace(/\.[^.]+$/, ''));
+      } catch {
+        markdown = '```json\n' + jsonContent + '\n```\n';
+      }
     } else if (OFFICE_EXTENSIONS.includes(ext)) {
       markdown = await convertWithOfficeParser(tempPath);
     } else {
