@@ -593,9 +593,10 @@ function convertXmlToMarkdown(xmlContent: string): string {
     } else if (openingTag) {
       // Opening tag
       const depth = tagStack.length;
-      // Major sections get headings
-      if (depth <= 1 && openingTag.length > 2) {
-        result.push('', `## ${openingTag}`, '');
+      // Major sections get headings (depth 0-2)
+      if (depth <= 2 && openingTag.length > 2) {
+        const level = Math.min(depth + 2, 4);
+        result.push('', `${'#'.repeat(level)} ${openingTag}`, '');
       }
       tagStack.push(openingTag);
     }
@@ -1571,6 +1572,29 @@ export async function POST(request: NextRequest) {
         const markdown = convertXmlToMarkdown(xmlContent);
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
         return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+      } else if (ext === '.json') {
+        const jsonBytes = await file.arrayBuffer();
+        const jsonContent = new TextDecoder('utf-8').decode(jsonBytes);
+        let markdown: string;
+        try {
+          const parsed = JSON.parse(jsonContent);
+          markdown = jsonToMarkdown(parsed, file.name.replace(/\.[^.]+$/, ''));
+        } catch { markdown = '```json\n' + jsonContent + '\n```\n'; }
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+      } else if (ext === '.csv') {
+        const csvBytes = await file.arrayBuffer();
+        const csvContent = new TextDecoder('utf-8').decode(csvBytes);
+        let markdown = convertCsvToMarkdown(csvContent);
+        markdown = postProcessCsvMarkdown(markdown, file.name);
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+      } else if (TEXT_EXTENSIONS.includes(ext)) {
+        const txtBytes = await file.arrayBuffer();
+        let txtContent = new TextDecoder('utf-8').decode(txtBytes);
+        if (ext === '.txt') { txtContent = postProcessTxtMarkdown(txtContent, file.name); }
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        return jsonWithCors({ markdown: txtContent, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: txtContent.split('\n').length, charCount: txtContent.length });
       } else {
         // PDF and others → Render
         const renderFormData = new FormData();
