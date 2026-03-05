@@ -623,12 +623,17 @@ function postProcessHwpFinal(md: string): string {
     // Remove page numbers from TOC: "- 제1조(목적) [필수] 7" → "- 제1조(목적) [필수]"
     line = line.replace(/(\[(?:필수|선택)[,필수선택]*\])\s+\d{1,3}\s*$/, '$1');
     
-    // Remove standalone metadata headings: "## 2026. 2.", "## 고용노동부", "## 일반 근로자용"
-    if (/^##\s+\d{4}\.\s*\d{1,2}\.\s*$/.test(line.trim()) ||
-        /^##\s+(고용노동부|국세청|중소벤처기업부)\s*$/.test(line.trim()) ||
-        /^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/.test(line.trim())) {
-      if (!metaRemoved) metaRemoved = true;
-      continue; // Skip these lines
+    // Remove standalone metadata: with or without ## prefix
+    // "## 2026. 2." or just "2026. 2." / "고용노동부" / "일반 근로자용"
+    const trimLine = line.trim().replace(/^#{1,3}\s+/, ''); // strip heading markers
+    if (/^\d{4}\.\s*\d{1,2}\.\s*$/.test(trimLine) ||
+        /^(고용노동부|국세청|중소벤처기업부)\s*$/.test(trimLine) ||
+        /^(일반\s*근로자용|단시간\s*근로자용)\s*$/.test(trimLine)) {
+      // Only remove if within first 30 lines (metadata area)
+      if (i < 30) {
+        if (!metaRemoved) metaRemoved = true;
+        continue;
+      }
     }
     
     // Split notice box: "| ◈ ...◈ ...◈ ... |" → separate blockquotes
@@ -643,14 +648,17 @@ function postProcessHwpFinal(md: string): string {
       }
     }
     
-    // Fix broken form tables: single-cell with 200+ chars
-    if (line.trim().startsWith('|') && line.trim().endsWith('|') && line.trim().length > 200) {
+    // Fix broken form tables: single-cell or mostly-empty multi-cell with long content
+    if (line.trim().startsWith('|') && line.trim().endsWith('|') && line.trim().length > 150) {
       const cells = line.trim().split('|').filter(s => s.trim());
-      if (cells.length <= 2) {
-        const content = cells[0]?.trim() || '';
+      const totalContent = cells.join(' ').trim();
+      // Single or few meaningful cells with long content = broken form
+      if (cells.length <= 2 || (cells.length > 2 && totalContent.length > 150 && cells.filter(c => c.trim()).length <= 2)) {
+        const content = totalContent;
         // Check if it's a 별지 header
         if (/^\[별지\s*\d+\]/.test(content)) {
-          result.push(`## ${content.replace(/[\[\]]/g, '')}`);
+          const title = content.match(/^(\[별지\s*\d+\]\s*[^\d].+?)(?:\d\.|$)/)?.[1] || content;
+          result.push(`\n---\n\n## ${title.replace(/[\[\]]/g, '').trim()}`);
         } else {
           // Break into numbered items
           let formatted = content
@@ -661,6 +669,13 @@ function postProcessHwpFinal(md: string): string {
         }
         continue;
       }
+    }
+    
+    // Fix multi-cell broken tables with 별지 header: "| [별지 2] 출 석 통 지 서 | | | | | |"
+    if (line.trim().startsWith('|') && /\[별지\s*\d+\]/.test(line)) {
+      const content = line.trim().split('|').filter(s => s.trim()).join(' ').trim();
+      result.push(`\n---\n\n## ${content.replace(/[\[\]]/g, '').trim()}`);
+      continue;
     }
     
     result.push(line);
