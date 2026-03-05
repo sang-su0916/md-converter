@@ -607,6 +607,83 @@ function postProcessTxtMarkdown(md: string, filename: string): string {
   return result.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
 }
 
+/**
+ * Final post-processing for HWP documents (applied after postProcessPdfMarkdown)
+ * Handles: page numbers, notice boxes, metadata, broken form tables
+ */
+function postProcessHwpFinal(md: string): string {
+  let lines = md.split('\n');
+  const result: string[] = [];
+  
+  // Phase 1: Line-by-line fixes
+  let metaRemoved = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Remove page numbers from TOC: "- 제1조(목적) [필수] 7" → "- 제1조(목적) [필수]"
+    line = line.replace(/(\[(?:필수|선택)[,필수선택]*\])\s+\d{1,3}\s*$/, '$1');
+    
+    // Remove standalone metadata headings: "## 2026. 2.", "## 고용노동부", "## 일반 근로자용"
+    if (/^##\s+\d{4}\.\s*\d{1,2}\.\s*$/.test(line.trim()) ||
+        /^##\s+(고용노동부|국세청|중소벤처기업부)\s*$/.test(line.trim()) ||
+        /^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/.test(line.trim())) {
+      if (!metaRemoved) metaRemoved = true;
+      continue; // Skip these lines
+    }
+    
+    // Split notice box: "| ◈ ...◈ ...◈ ... |" → separate blockquotes
+    if (line.trim().startsWith('|') && line.includes('◈') && line.trim().length > 200) {
+      const content = line.trim().replace(/^\|\s*/, '').replace(/\s*\|$/, '');
+      const notices = content.split(/(?=◈)/).filter(s => s.trim());
+      if (notices.length > 1) {
+        for (const n of notices) {
+          result.push(`> ${n.trim()}`, '');
+        }
+        continue;
+      }
+    }
+    
+    // Fix broken form tables: single-cell with 200+ chars
+    if (line.trim().startsWith('|') && line.trim().endsWith('|') && line.trim().length > 200) {
+      const cells = line.trim().split('|').filter(s => s.trim());
+      if (cells.length <= 2) {
+        const content = cells[0]?.trim() || '';
+        // Check if it's a 별지 header
+        if (/^\[별지\s*\d+\]/.test(content)) {
+          result.push(`## ${content.replace(/[\[\]]/g, '')}`);
+        } else {
+          // Break into numbered items
+          let formatted = content
+            .replace(/(\d+)\.\s+/g, '\n$1. ')
+            .replace(/\s+-\s+/g, '\n   - ')
+            .trim();
+          result.push(formatted);
+        }
+        continue;
+      }
+    }
+    
+    result.push(line);
+  }
+  
+  // Phase 2: Insert metadata after title
+  let output = result.join('\n');
+  if (metaRemoved) {
+    const titleMatch = output.match(/^#\s+.+$/m);
+    if (titleMatch) {
+      const idx = output.indexOf(titleMatch[0]) + titleMatch[0].length;
+      output = output.slice(0, idx) + 
+        '\n\n**발행**: 고용노동부 | **시행**: 2026. 2. | **대상**: 일반 근로자용\n\n---' + 
+        output.slice(idx);
+    }
+  }
+  
+  // Phase 3: Clean up multiple blank lines
+  output = output.replace(/\n{4,}/g, '\n\n\n');
+  
+  return output;
+}
+
 function convertXmlToMarkdown(xmlContent: string): string {
   const result: string[] = [];
   // Remove XML declaration
@@ -1735,9 +1812,10 @@ export async function POST(request: NextRequest) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
           } else if (['.docx', '.doc', '.pptx', '.ppt', '.hwp'].includes(ext)) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
-            // HWP form docs: extract field headings from table rows
+            // HWP: additional post-processing for proxy output format
             if (ext === '.hwp') {
               data.markdown = extractTableFieldHeadings(data.markdown);
+              data.markdown = postProcessHwpFinal(data.markdown);
             }
           } else if (ext === '.csv') {
             data.markdown = postProcessCsvMarkdown(data.markdown, file.name);
