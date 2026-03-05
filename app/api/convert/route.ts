@@ -767,16 +767,26 @@ function formatHwpTextToMarkdown(text: string): string {
     }
 
     // TOC detection: line with many 제X조 references (moved up to prevent #### conversion)
+    // Skip if inside annotation block or if line starts with annotation markers
     const tocArticleRefs = trimmed.match(/제\d+조/g);
-    if (tocArticleRefs && tocArticleRefs.length > 2) {
-      // Format as structured list — do NOT convert to #### headings
-      const parts = trimmed.split(/\s{2,}/);
-      for (const part of parts) {
-        const p = part.trim();
-        if (!p) continue;
-        if (/^제\d+장/.test(p)) result.push(`\n**${p}**`);
-        else if (/^제\d+절/.test(p)) result.push(`  *${p}*`);
-        else if (/^제\d+조/.test(p)) result.push(`  - ${p}`);
+    if (!inAnnotation && tocArticleRefs && tocArticleRefs.length > 2
+        && !/착안사항|☞|◈|\[필수\]|\[선택\]/.test(trimmed)) {
+      // Split concatenated TOC entries: "제1장 총칙제1조(목적) [필수] 7제2조..."
+      // Insert newlines before each 제X장, 제X절, 제X조 pattern
+      const tocFormatted = trimmed
+        .replace(/(제\s*\d+\s*장\s*[^\d제]*)/g, '\n$1')
+        .replace(/(제\s*\d+\s*절\s*[^\d제]*)/g, '\n$1')
+        .replace(/(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*\[(?:필수|선택)[^\]]*\]\s*\d*)/g, '\n$1')
+        .replace(/(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*(?!\[))/g, '\n$1')
+        .replace(/(부\s*칙\s*\d*)/g, '\n$1')
+        .trim();
+      const tocLines = tocFormatted.split('\n').filter(l => l.trim());
+      for (const tl of tocLines) {
+        const p = tl.trim();
+        if (/^제\s*\d+\s*장/.test(p)) result.push(`\n**${p}**`);
+        else if (/^제\s*\d+\s*절/.test(p)) result.push(`  *${p}*`);
+        else if (/^제\s*\d+\s*조/.test(p)) result.push(`  - ${p}`);
+        else if (/^부\s*칙/.test(p)) result.push(`\n**${p}**`);
         else result.push(`  ${p}`);
       }
       continue;
@@ -965,6 +975,13 @@ function finalCleanup(md: string): string {
 
   // 5. Fix annotation lines that have table fragments mixed in
   result = result.replace(/^>\s*\*\*착안사항\*\*:\s*\|\s*/gm, '> **착안사항**: ');
+
+  // 6. Clean inline table fragments in blockquotes: " | ... | | --- |" at end of annotation lines
+  result = result.replace(/(\s)\|\s*\|\s*---\s*\|\s*$/gm, '$1');
+  result = result.replace(/\s*\|\s*\|\s*---\s*\|\s*$/gm, '');
+
+  // 7. Remove standalone "| 취업규칙(안) | 취업규칙(안) |" header rows (TOC decorations)
+  result = result.replace(/^\|\s*취업규칙\(안\)\s*\|\s*취업규칙\(안\)\s*\|\s*$/gm, '');
 
   return result.trim() + '\n';
 }
