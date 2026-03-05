@@ -87,11 +87,17 @@ async function checkMarkitdown(): Promise<string | null> {
 }
 
 async function convertPdfToMarkdown(filePath: string): Promise<string> {
-  const { extractText, getDocumentProxy } = await import('unpdf');
-  const buffer = await readFile(filePath);
-  const pdf = await getDocumentProxy(new Uint8Array(buffer));
-  const { text } = await extractText(pdf, { mergePages: true });
-  return text || '';
+  try {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const buffer = await readFile(filePath);
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    return text || '';
+  } catch (e: unknown) {
+    console.error('unpdf failed:', e instanceof Error ? e.message : e);
+    // Fallback: try markitdown for PDF
+    return '';
+  }
 }
 
 async function convertWithOfficeParser(filePath: string): Promise<string> {
