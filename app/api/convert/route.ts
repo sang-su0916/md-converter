@@ -459,6 +459,15 @@ function postProcessPdfMarkdown(md: string): string {
   // "## 사업개요\n\n\n6 2." → remove orphan page+section numbers
   output = output.replace(/^(\d{1,3})\s+(\d+)\.\s*$/gm, '');
 
+  // Phase 2.5: Split "Title (ykdojo Tip #) body..." into heading + paragraph
+  // e.g. "음성으로 코딩하기 (ykdojo Tip #) ykdojo가..." → "## 음성으로 코딩하기\nykdojo가..."
+  output = output.replace(/^(.{5,80})\s*\((ykdojo|Ado)\s+Tip\s*#[^)]*\)\s+(.{20,})/gm,
+    (_m, title, _src, body) => `\n## ${title.trim()}\n\n${body.trim()}`);
+  // Also split "...Part : 제목 N.N." embedded in lines
+  output = output.replace(/\s+Part\s*:\s*([^.]+\d+\.\d+\.)/g, '\n\n## $1');
+  // Split "(Ado #N) body" or "(ykdojo #N) body" patterns (TOC area)
+  output = output.replace(/\((ykdojo|Ado)\s*#[^)]*\)\s+(\d+\.\d+\.)/g, '\n\n### $2');
+
   // Phase 3: Split circled numbers embedded in long lines
   // "...한다. ① 내용 ② 내용" → separate lines
   output = output.replace(/([다함음임됨짐요].)\s*(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)/g, '$1\n\n$2');
