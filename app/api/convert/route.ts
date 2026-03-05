@@ -1588,6 +1588,58 @@ function finalCleanup(md: string): string {
   // 9. Remove orphan "| --- | --- |" lines not adjacent to table content
   result = result.replace(/^\|\s*---\s*\|\s*---\s*\|\s*$/gm, '');
 
+  // 10. TOC: remove page numbers from article entries (e.g., "[필수] 7" → "[필수]")
+  result = result.replace(/(\[(?:필수|선택)[^\]]*\])\s+\d{1,3}\s*$/gm, '$1');
+  
+  // 11. TOC: convert bold chapter headers to markdown headings for navigation
+  // **제X장 ...** → ### 제X장 ...
+  result = result.replace(/^\*\*(제\d+장\s+.+?)\*\*\s*$/gm, '### $1');
+  // *제X절 ...* → #### 제X절 ...
+  result = result.replace(/^\*(제\d+절\s+.+?)\*\s*$/gm, '#### $1');
+  // **부 칙** or **부칙** → ### 부칙
+  result = result.replace(/^\*\*부\s*칙[^*]*\*\*\s*$/gm, '### 부칙');
+  
+  // 12. Split single-cell notice box (◈ 안내문) into separate blockquotes
+  result = result.replace(/^\|\s*(◈[^|]+(?:◈[^|]+)*)\s*\|\s*$/gm, (_match, content) => {
+    // Split on ◈ markers
+    const notices = content.split(/(?=◈)/).filter((s: string) => s.trim());
+    return notices.map((n: string) => `> ${n.trim()}`).join('\n\n');
+  });
+
+  // 13. Structure metadata: standalone "고용노동부" or "일반 근로자용" after title
+  // Detect pattern: "## 2026. 2." + "## 고용노동부" + "## 일반 근로자용"
+  result = result.replace(
+    /^##\s+(\d{4})\.\s*(\d{1,2})\.\s*$\n+^##\s+(고용노동부|국세청|중소벤처기업부)\s*$\n+^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/gm,
+    '**발행**: $3 | **시행**: $1. $2. | **대상**: $4\n\n---'
+  );
+
+  // 14. Fix broken appendix form tables: single-cell rows with 200+ chars
+  const finalLines = result.split('\n');
+  const fixedLines: string[] = [];
+  for (let i = 0; i < finalLines.length; i++) {
+    const line = finalLines[i];
+    // Detect single-cell table with very long content (broken form)
+    if (line.startsWith('|') && line.endsWith('|') && line.length > 200 && line.split('|').filter(Boolean).length <= 2) {
+      // Extract content from the single cell
+      const content = line.replace(/^\|\s*/, '').replace(/\s*\|$/, '').trim();
+      // Check if it's a 별지 header
+      if (/^\[별지\s*\d+\]/.test(content)) {
+        const title = content.match(/^\[별지\s*\d+\]\s*(.+)/)?.[1] || content;
+        fixedLines.push(`## ${content.replace(/[\[\]]/g, '')}`);
+      } else {
+        // Split numbered items: 1. ... 2. ... → list format
+        let formatted = content
+          .replace(/(\d+)\.\s+/g, '\n$1. ')
+          .replace(/\s*-\s+/g, '\n   - ')
+          .trim();
+        fixedLines.push(formatted);
+      }
+    } else {
+      fixedLines.push(line);
+    }
+  }
+  result = fixedLines.join('\n');
+
   return result.trim() + '\n';
 }
 
