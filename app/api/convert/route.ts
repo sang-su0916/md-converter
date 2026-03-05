@@ -1339,7 +1339,23 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         body: renderFormData,
       });
-      const data = await res.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await res.json() as any;
+      
+      // Post-process Render response for PDF and HTML
+      if (data.markdown) {
+        const ext = file.name.lastIndexOf('.') >= 0 ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
+        if (PDF_EXTENSIONS.includes(ext)) {
+          data.markdown = postProcessPdfMarkdown(data.markdown);
+          data.lineCount = data.markdown.split('\n').length;
+          data.charCount = data.markdown.length;
+        } else if (HTML_EXTENSIONS.includes(ext)) {
+          data.markdown = postProcessHtmlMarkdown(data.markdown);
+          data.lineCount = data.markdown.split('\n').length;
+          data.charCount = data.markdown.length;
+        }
+      }
+      
       return jsonWithCors(data, res.status);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
