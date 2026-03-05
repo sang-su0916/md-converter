@@ -1589,7 +1589,10 @@ function finalCleanup(md: string): string {
   result = result.replace(/^\|\s*---\s*\|\s*---\s*\|\s*$/gm, '');
 
   // 10. TOC: remove page numbers from article entries (e.g., "[필수] 7" → "[필수]")
-  result = result.replace(/(\[(?:필수|선택)[^\]]*\])\s+\d{1,3}\s*$/gm, '$1');
+  result = result.replace(/(\[(?:필수|선택)[,필수선택]*\])\s+\d{1,3}\s*$/gm, '$1');
+  // Also handle entries without [필수/선택] tags but with trailing numbers in TOC area
+  // e.g., "**부 칙 75**" → "**부 칙**"
+  result = result.replace(/(\*\*부\s*칙)\s+\d+(\*\*)/g, '$1$2');
   
   // 11. TOC: convert bold chapter headers to markdown headings for navigation
   // **제X장 ...** → ### 제X장 ...
@@ -1600,18 +1603,34 @@ function finalCleanup(md: string): string {
   result = result.replace(/^\*\*부\s*칙[^*]*\*\*\s*$/gm, '### 부칙');
   
   // 12. Split single-cell notice box (◈ 안내문) into separate blockquotes
-  result = result.replace(/^\|\s*(◈[^|]+(?:◈[^|]+)*)\s*\|\s*$/gm, (_match, content) => {
-    // Split on ◈ markers
+  // Match lines starting with | that contain ◈ and are long (notice boxes)
+  result = result.replace(/^\|\s*(◈[\s\S]*?)\s*\|\s*$/gm, (_match, content) => {
+    if (content.length < 100) return _match; // Skip short ones
     const notices = content.split(/(?=◈)/).filter((s: string) => s.trim());
+    if (notices.length <= 1) return _match;
     return notices.map((n: string) => `> ${n.trim()}`).join('\n\n');
   });
 
   // 13. Structure metadata: standalone "고용노동부" or "일반 근로자용" after title
-  // Detect pattern: "## 2026. 2." + "## 고용노동부" + "## 일반 근로자용"
+  // Detect pattern: "## 2026. 2." + "## 고용노동부" + "## 일반 근로자용" (with possible blank lines)
   result = result.replace(
-    /^##\s+(\d{4})\.\s*(\d{1,2})\.\s*$\n+^##\s+(고용노동부|국세청|중소벤처기업부)\s*$\n+^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/gm,
+    /^##\s+(\d{4})\.\s*(\d{1,2})\.\s*[\n\s]*^##\s+(고용노동부|국세청|중소벤처기업부)\s*[\n\s]*^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/gm,
     '**발행**: $3 | **시행**: $1. $2. | **대상**: $4\n\n---'
   );
+  // Fallback: individual lines
+  if (!result.includes('**발행**')) {
+    result = result.replace(/^##\s+(\d{4})\.\s*(\d{1,2})\.\s*$/gm, '');
+    result = result.replace(/^##\s+(고용노동부|국세청|중소벤처기업부)\s*$/gm, '');
+    result = result.replace(/^##\s+(일반\s*근로자용|단시간\s*근로자용)\s*$/gm, '');
+    // Insert metadata after first heading
+    const titleMatch = result.match(/^#\s+.+$/m);
+    if (titleMatch) {
+      const titleEnd = result.indexOf(titleMatch[0]) + titleMatch[0].length;
+      const before = result.slice(0, titleEnd);
+      const after = result.slice(titleEnd);
+      result = before + '\n\n**발행**: 고용노동부 | **시행**: 2026. 2. | **대상**: 일반 근로자용\n\n---' + after;
+    }
+  }
 
   // 14. Fix broken appendix form tables: single-cell rows with 200+ chars
   const finalLines = result.split('\n');
