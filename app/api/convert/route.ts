@@ -529,23 +529,51 @@ function postProcessPdfMarkdown(md: string): string {
   // Fix double headings: "# \n\n## title" → just "## title"
   output = output.replace(/^#\s*\n+(?=##)/gm, '');
 
-  // Phase 7: Ensure document has a proper title (simple and direct)
-  // If no # heading in first 5 lines, promote first ## to #
-  const firstLines = output.split('\n').slice(0, 10);
-  const hasEarlyH1 = firstLines.some(l => l.trim().startsWith('# '));
+  // Phase 7: Ensure line 1 is a # title
+  const ph7lines = output.split('\n');
   
-  if (!hasEarlyH1) {
-    // Find and promote first ## to #
-    const h2Match = output.match(/^##\s+(.{1,100})\s*$/m);
-    if (h2Match) {
-      const h2Line = h2Match[0];
-      const h2Text = h2Match[1].trim();
-      output = output.replace(h2Line, `# ${h2Text}`);
+  if (!ph7lines[0]?.trim().startsWith('# ')) {
+    // Line 1 is not a # heading
+    const firstText = ph7lines[0]?.trim() || '';
+    
+    // Option A: Find existing # heading in first 15 lines and move it to top
+    let movedTitle = false;
+    for (let i = 1; i < Math.min(15, ph7lines.length); i++) {
+      const t = ph7lines[i].trim();
+      if (t.startsWith('# ') && !t.startsWith('## ') && t.length < 120) {
+        // Move this # heading to line 0
+        const titleLine = ph7lines.splice(i, 1)[0];
+        ph7lines.unshift(titleLine, '');
+        movedTitle = true;
+        break;
+      }
     }
+    
+    if (!movedTitle) {
+      // Option B: Find first ## and promote+move
+      for (let i = 0; i < Math.min(20, ph7lines.length); i++) {
+        const t = ph7lines[i].trim();
+        if (t.startsWith('## ') && t.length < 120) {
+          const titleText = t.replace(/^##\s+/, '');
+          ph7lines.splice(i, 1);
+          ph7lines.unshift(`# ${titleText}`, '');
+          movedTitle = true;
+          break;
+        }
+      }
+    }
+    
+    if (!movedTitle && firstText.length > 10 && firstText.length < 200) {
+      // Option C: First line looks like a title — add # prefix
+      const title = firstText.slice(0, 80).trim();
+      ph7lines[0] = `# ${title}`;
+    }
+    
+    output = ph7lines.join('\n');
   }
   
-  // Truncate overly long # headings (anywhere in doc)
-  output = output.replace(/^#\s+(.{90,})\s*$/gm, (match, text) => `# ${text.slice(0, 80).trim()}`);
+  // Truncate overly long # titles
+  output = output.replace(/^#\s+(.{90,})\s*$/gm, (_m, text) => `# ${text.slice(0, 80).trim()}`);
 
   return output.replace(/\n{4,}/g, '\n\n\n').replace(/\f/g, '').trim() + '\n';
 }
