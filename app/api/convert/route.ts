@@ -778,34 +778,54 @@ export async function POST(request: NextRequest) {
       }
 
       // Strategy: hwp5html → custom HTML text extraction → formatHwpTextToMarkdown
-      // This avoids markitdown's table preservation which makes HWP layout tables unreadable
+      let conversionMethod = '';
+      let htmlSize = 0;
+      let plainTextSize = 0;
+
+      // Method 1: hwp5html → extractTextFromHwpHtml → formatHwpTextToMarkdown
       try {
         await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
         const htmlContent = await readFile(tempHtmlPath, 'utf-8');
+        htmlSize = htmlContent.length;
         const plainText = extractTextFromHwpHtml(htmlContent);
-        const markdown = formatHwpTextToMarkdown(plainText);
-        return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
-      } catch {
-        // Fallback 1: hwp5txt
-        try {
-          const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
-          if (hwpText && hwpText.trim().length > 200) {
-            const markdown = formatHwpTextToMarkdown(hwpText);
-            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
-          }
-        } catch { /* hwp5txt also failed */ }
-        // Fallback 2: markitdown (original path)
-        try {
-          await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
-          const markitdownBin = await checkMarkitdown();
-          if (markitdownBin) {
-            const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
-            const markdown = postProcessHwpMarkdown(stdout);
-            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
-          }
-        } catch { /* */ }
-        return jsonWithCors({ error: 'HWP 변환 오류: 모든 변환 방법이 실패했습니다.' }, 500);
+        plainTextSize = plainText.length;
+        if (plainText.trim().length > 500) {
+          conversionMethod = 'hwp5html→extractText';
+          const markdown = formatHwpTextToMarkdown(plainText);
+          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, plainTextSize } });
+        }
+        conversionMethod = 'hwp5html→extractText (too short, trying next)';
+      } catch (e: unknown) {
+        conversionMethod = `hwp5html failed: ${e instanceof Error ? e.message : String(e)}`;
       }
+
+      // Method 2: hwp5html → markitdown → postProcessHwpMarkdown
+      try {
+        if (!htmlSize) {
+          await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
+        }
+        const markitdownBin = await checkMarkitdown();
+        if (markitdownBin) {
+          const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
+          if (stdout.trim().length > 500) {
+            conversionMethod = 'hwp5html→markitdown';
+            const markdown = postProcessHwpMarkdown(stdout);
+            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length } });
+          }
+        }
+      } catch { /* markitdown failed */ }
+
+      // Method 3: hwp5txt → formatHwpTextToMarkdown
+      try {
+        const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
+        if (hwpText && hwpText.trim().length > 200) {
+          conversionMethod = 'hwp5txt';
+          const markdown = formatHwpTextToMarkdown(hwpText);
+          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, hwp5txtSize: hwpText.length, htmlSize, plainTextSize } });
+        }
+      } catch { /* hwp5txt also failed */ }
+
+      return jsonWithCors({ error: 'HWP 변환 오류: 모든 변환 방법이 실패했습니다.', _debug: { conversionMethod, htmlSize, plainTextSize } }, 500);
     }
 
     const markitdownBin = await checkMarkitdown();
