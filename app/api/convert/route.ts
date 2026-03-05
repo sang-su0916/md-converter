@@ -368,6 +368,15 @@ function postProcessPdfMarkdown(md: string): string {
       }
     }
 
+    // Star/bullet section markers: ★ 준비서류, ※ 참고사항 etc.
+    if (/^[★※☆◎●]\s/.test(trimmed) && trimmed.length < 100) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Table cell that looks like a field label (short, in |...|)
+    // Already handled by table structure
+
     // Korean government doc patterns: "고용노동부 공고 제XXXX호"
     if (/^(고용노동부|국세청|중소벤처기업부|기획재정부)\s*(공고|고시|훈령)/.test(trimmed)) {
       result.push('', `# ${trimmed}`, '');
