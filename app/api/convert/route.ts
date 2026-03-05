@@ -153,37 +153,43 @@ function formatPdfText(text: string): string {
       continue;
     }
 
-    // Roman numeral headings: Ⅰ. Ⅱ. etc.
-    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed)) {
+    // Roman numeral headings: Ⅰ. Ⅱ. etc. (anywhere in line)
+    if (/[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed) && trimmed.length < 80) {
       formatted.push('', `# ${trimmed}`, '');
       continue;
     }
 
     // Numeric major headings: "1. 제목" (short, likely heading)
-    if (/^\d+\.\s/.test(trimmed) && trimmed.length < 60 && !/[,;]/.test(trimmed)) {
+    if (/^\d+\.\s/.test(trimmed) && trimmed.length < 80 && !/[,;]/.test(trimmed)) {
       formatted.push('', `## ${trimmed}`, '');
       continue;
     }
 
     // Korean chapter/article patterns
-    if (/^제\s*\d+\s*장\s/.test(trimmed) && trimmed.length < 50) {
+    if (/제\s*\d+\s*장/.test(trimmed) && trimmed.length < 80) {
       formatted.push('', `## ${trimmed}`, '');
       continue;
     }
-    if (/^제\s*\d+\s*조[\s(]/.test(trimmed) && trimmed.length < 80) {
+    if (/제\s*\d+\s*조[\s(]/.test(trimmed) && trimmed.length < 100) {
       formatted.push('', `### ${trimmed}`, '');
       continue;
     }
 
-    // CONTENTS/목차 heading
-    if (/^(CONTENTS|목차|차례|TABLE OF CONTENTS)\s*$/i.test(trimmed)) {
+    // CONTENTS/목차/차례 - any line containing these keywords
+    if (/CONTENTS|목차|차례|TABLE OF CONTENTS/i.test(trimmed) && trimmed.length < 100) {
       formatted.push('', `# ${trimmed}`, '');
       continue;
     }
 
     // ALL-CAPS or short bold-like lines (likely section titles)
-    if (trimmed.length < 40 && /^[A-Z\s]+$/.test(trimmed) && trimmed.length > 3) {
+    if (trimmed.length < 50 && /^[A-Z\s]+$/.test(trimmed) && trimmed.length > 3) {
       formatted.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Short standalone lines ending with "은" "는" "의" (Korean topic markers - likely section titles)
+    if (trimmed.length < 50 && /[은는의]$/.test(trimmed) && formatted[formatted.length - 1] === '') {
+      formatted.push(`## ${trimmed}`, '');
       continue;
     }
 
@@ -282,7 +288,9 @@ async function convertHtmlToMarkdown(htmlContent: string): Promise<string> {
   // Post-process: detect heading-like patterns in the output
   const lines = md.split('\n');
   const result: string[] = [];
-  for (const line of lines) {
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const trimmed = line.trim();
 
     // TOPIC XX pattern → heading
@@ -291,15 +299,30 @@ async function convertHtmlToMarkdown(htmlContent: string): Promise<string> {
       continue;
     }
 
-    // Short bold lines that look like section titles
-    if (/^\*\*[^*]+\*\*$/.test(trimmed) && trimmed.length < 80
+    // Short bold lines that look like section titles (isolated, standalone)
+    if (/^\*\*[^*]+\*\*$/.test(trimmed) && trimmed.length < 100
         && !trimmed.includes('http') && !trimmed.includes('@')) {
       const title = trimmed.replace(/\*\*/g, '');
-      // Only promote if it's a likely heading (short, no punctuation at end)
-      if (title.length < 60 && !title.endsWith('.') && !title.endsWith(',')) {
+      // Check if it's isolated (surrounded by blank lines or start/end)
+      const prevBlank = i === 0 || lines[i - 1].trim() === '';
+      const nextBlank = i === lines.length - 1 || lines[i + 1]?.trim() === '';
+      if (prevBlank && title.length < 80 && title.length > 3) {
         result.push('', `## ${title}`, '');
         continue;
       }
+    }
+
+    // Korean section markers ending with 은/는/의 (standalone lines)
+    if (trimmed.length > 5 && trimmed.length < 60 && /[은는의]$/.test(trimmed)
+        && (i === 0 || lines[i - 1].trim() === '')) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // All-caps lines (likely headings)
+    if (trimmed.length > 3 && trimmed.length < 50 && /^[A-Z\s]+$/.test(trimmed)) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
     }
 
     result.push(line);
