@@ -658,7 +658,21 @@ function postProcessHtmlMarkdown(md: string): string {
     result.push(lines[i]);
   }
 
-  return result.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+  // Ensure first line is a # title
+  let htmlOutput = result.join('\n');
+  const htmlLines = htmlOutput.split('\n');
+  if (!htmlLines[0]?.trim().startsWith('# ')) {
+    for (let i = 0; i < Math.min(5, htmlLines.length); i++) {
+      const t = htmlLines[i].trim();
+      if (t && !t.startsWith('#') && t.length > 5 && t.length < 150) {
+        htmlLines[i] = `# ${t}`;
+        htmlOutput = htmlLines.join('\n');
+        break;
+      }
+    }
+  }
+
+  return htmlOutput.replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
 }
 
 /**
