@@ -1332,31 +1332,31 @@ export async function POST(request: NextRequest) {
       const file = formData.get('file') as File | null;
       if (!file) return jsonWithCors({ error: '파일을 선택해 주세요.' }, 400);
 
-      const renderFormData = new FormData();
-      renderFormData.append('file', file);
+      // HTML은 Vercel 로컬에서 직접 처리 (Render HTML 변환 품질 낮음)
+      const ext = file.name.lastIndexOf('.') >= 0 ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
+      if (HTML_EXTENSIONS.includes(ext)) {
+        // Fall through to DIRECT MODE for HTML
+      } else {
+        // PDF and others → Render
+        const renderFormData = new FormData();
+        renderFormData.append('file', file);
 
-      const res = await fetch(`${RENDER_API_URL}/api/convert`, {
-        method: 'POST',
-        body: renderFormData,
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await res.json() as any;
-      
-      // Post-process Render response for PDF and HTML
-      if (data.markdown) {
-        const ext = file.name.lastIndexOf('.') >= 0 ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
-        if (PDF_EXTENSIONS.includes(ext)) {
+        const res = await fetch(`${RENDER_API_URL}/api/convert`, {
+          method: 'POST',
+          body: renderFormData,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = await res.json() as any;
+        
+        // Post-process Render response for PDF
+        if (data.markdown && PDF_EXTENSIONS.includes(ext)) {
           data.markdown = postProcessPdfMarkdown(data.markdown);
           data.lineCount = data.markdown.split('\n').length;
           data.charCount = data.markdown.length;
-        } else if (HTML_EXTENSIONS.includes(ext)) {
-          data.markdown = postProcessHtmlMarkdown(data.markdown);
-          data.lineCount = data.markdown.split('\n').length;
-          data.charCount = data.markdown.length;
         }
+        
+        return jsonWithCors(data, res.status);
       }
-      
-      return jsonWithCors(data, res.status);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return jsonWithCors({ error: `서버 연결 오류: ${message}` }, 502);
