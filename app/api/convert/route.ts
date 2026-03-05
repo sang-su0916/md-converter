@@ -422,6 +422,12 @@ function postProcessPdfMarkdown(md: string): string {
 
   let output = result.join('\n');
 
+  // Phase 1.5: Fix garbage merged headings (cover+TOC in one line)
+  // "# 고용창출장려금은...CONTENTS 목차 Ⅰ." → remove (cover page artifact)
+  output = output.replace(/^#\s+.{100,}(CONTENTS|목차).+$/gm, '');
+  // Very long # headings (100+ chars) → likely garbage, downgrade to paragraph
+  output = output.replace(/^(#{1,2})\s+(.{120,})$/gm, '$2');
+
   // Phase 2: Remove page numbers from headings
   // "# 87 Ⅰ 고용장려금" → "# Ⅰ 고용장려금"
   // "# 3 Ⅱ." → skip (TOC artifact)
@@ -435,14 +441,18 @@ function postProcessPdfMarkdown(md: string): string {
   // Also split when circled numbers appear mid-line without sentence ending
   output = output.replace(/\s+(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)\s/g, '\n\n$1 ');
 
-  // Phase 4: Split very long lines (300+ chars) at sentence boundaries
+  // Phase 4: Split long lines at sentence/item boundaries
   const lines2 = output.split('\n');
   const result2: string[] = [];
   for (const line of lines2) {
-    if (line.length > 300 && !line.startsWith('#') && !line.startsWith('|')) {
+    if (line.length > 200 && !line.startsWith('#') && !line.startsWith('|')) {
       // Split at Korean sentence endings followed by space
-      const split = line.replace(/([다함음임됨짐요]\.)\s+/g, '$1\n\n').split('\n');
-      result2.push(...split);
+      let split = line.replace(/([다함음임됨짐요니까]\.)\s+/g, '$1\n\n');
+      // Split at parenthesized references followed by new topic
+      split = split.replace(/\)\s+([\d①②③④⑤⑥⑦⑧⑨⑩])/g, ')\n\n$1');
+      // Split at "지원 XX" patterns after sentence end
+      split = split.replace(/([다함음됨])\s+(지원|신청|문의)/g, '$1\n\n$2');
+      result2.push(...split.split('\n'));
     } else {
       result2.push(line);
     }
@@ -462,11 +472,18 @@ function postProcessPdfMarkdown(md: string): string {
 
   // Phase 7: Ensure document has a title
   const firstHeading = output.match(/^#\s+.+$/m);
-  if (!firstHeading || output.indexOf(firstHeading[0]) > 500) {
-    // First non-empty line that's not a heading could be the title
+  const firstHeadingPos = firstHeading ? output.indexOf(firstHeading[0]) : -1;
+  if (!firstHeading || firstHeadingPos > 500) {
+    // First non-empty, non-heading line could be the title
     const firstLine = output.split('\n').find(l => l.trim() && !l.startsWith('#') && l.trim().length > 5);
     if (firstLine && firstLine.trim().length < 200) {
       output = `# ${firstLine.trim()}\n\n${output}`;
+    }
+  } else if (firstHeading && firstHeading[0].length > 120) {
+    // First heading is garbage (too long) — try ## as real title
+    const firstH2 = output.match(/^##\s+(.+)$/m);
+    if (firstH2) {
+      output = `# ${firstH2[1].trim()}\n\n${output}`;
     }
   }
 
