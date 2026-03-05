@@ -766,34 +766,23 @@ function formatHwpTextToMarkdown(text: string): string {
       continue;
     }
 
-    // Article headings: 제1조(목적) ...body
-    // Also handle mid-line article: "...이 규칙이 정하는 바에 따른다.제3조(사원의 정의)..."
-    // But NOT inside annotations (착안사항) — law references like "근로기준법 제17조(명시)" should stay as text
-    if (!inAnnotation && !trimmed.startsWith('제') && /제\s*\d+\s*조\s*\([^)]+\)/.test(trimmed)) {
-      const embeddedArticle = trimmed.match(/^(.+?)(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*.*)$/);
-      if (embeddedArticle) {
-        const before = embeddedArticle[1].trim();
-        const articlePart = embeddedArticle[2].trim();
-        // Only split if the "before" part looks like end of a clause (ends with 다, 함, 음, etc.)
-        // and the article part looks like a standalone article heading (not a law reference)
-        const isLawRef = /법|령|규칙|시행령/.test(before.slice(-10));
-        if (!isLawRef) {
-          if (before) result.push(before);
-          const subMatch = articlePart.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
-          if (subMatch) {
-            const title = subMatch[1].replace(/\s+/g, ' ').trim();
-            const body = (subMatch[2] || '').trim();
-            result.push('', `#### ${title}`, '');
-            if (body) result.push(formatArticleBody(body));
-          } else {
-            result.push('', `#### ${articlePart}`, '');
-          }
-          lastWasHeading = true;
-          continue;
-        }
+    // TOC detection: line with many 제X조 references (moved up to prevent #### conversion)
+    const tocArticleRefs = trimmed.match(/제\d+조/g);
+    if (tocArticleRefs && tocArticleRefs.length > 2) {
+      // Format as structured list — do NOT convert to #### headings
+      const parts = trimmed.split(/\s{2,}/);
+      for (const part of parts) {
+        const p = part.trim();
+        if (!p) continue;
+        if (/^제\d+장/.test(p)) result.push(`\n**${p}**`);
+        else if (/^제\d+절/.test(p)) result.push(`  *${p}*`);
+        else if (/^제\d+조/.test(p)) result.push(`  - ${p}`);
+        else result.push(`  ${p}`);
       }
+      continue;
     }
 
+    // Article headings: 제1조(목적) ...body
     const articleMatch = trimmed.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
     if (articleMatch) {
       const title = articleMatch[1].replace(/\s+/g, ' ').trim();
@@ -902,21 +891,7 @@ function formatHwpTextToMarkdown(text: string): string {
       continue;
     }
 
-    // TOC detection: line with many 제X조 references
-    const articleRefs = trimmed.match(/제\d+조/g);
-    if (articleRefs && articleRefs.length > 2) {
-      // Format as structured list
-      const parts = trimmed.split(/\s{2,}/);
-      for (const part of parts) {
-        const p = part.trim();
-        if (!p) continue;
-        if (/^제\d+장/.test(p)) result.push(`\n**${p}**`);
-        else if (/^제\d+절/.test(p)) result.push(`  *${p}*`);
-        else if (/^제\d+조/.test(p)) result.push(`  - ${p}`);
-        else result.push(`  ${p}`);
-      }
-      continue;
-    }
+    // (TOC detection moved above article heading matching)
 
     // Default: regular text
     inAnnotation = false;
@@ -935,8 +910,13 @@ function formatHwpTextToMarkdown(text: string): string {
  * Handles clause markers, sub-items, and paragraph structure
  */
 function formatArticleBody(body: string): string {
+  // Split embedded articles: "...따른다.제3조(정의) ..." → separate heading
+  // Only when preceded by sentence-ending period (NOT law references like "근로기준법 제17조")
+  let result = body.replace(/([다함음임됨짐음])\.(\s*)(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))/g,
+    '$1.\n\n#### $3\n');
+
   // Split on clause markers (①②③...)
-  let result = body
+  result = result
     .replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)/g, '\n\n$1')
     .replace(/\s(\d+\.)\s/g, '\n$1 ')
     .trim();
@@ -964,11 +944,21 @@ function finalCleanup(md: string): string {
   // 1. Split ☞ in annotations onto new lines (within blockquotes)
   result = result.replace(/(\s)(☞\s*\(참고\))/g, '\n> $2');
 
-  // 2. Remove empty table rows: lines with only | and whitespace
-  result = result.replace(/^(?:\|\s*)+\|\s*$/gm, '');
+  // 2. Remove empty table rows: lines with only | and whitespace (but not annotation lines)
+  result = result.replace(/^(?:\|\s*)+\|\s*$/gm, (match) => {
+    // Keep if it's part of a table structure (has --- separator nearby)
+    return match.includes('착안사항') ? match : '';
+  });
 
-  // 3. Remove orphan table separators without content
-  result = result.replace(/^(?:\|\s*---\s*)+\|\s*$/gm, '');
+  // 3. Remove orphan table separators with no data rows around them
+  result = result.replace(/^(?:\|\s*---\s*)+\|\s*$/gm, (match, offset) => {
+    // Check if there's actual table content nearby (within 200 chars before/after)
+    const before = result.slice(Math.max(0, offset - 200), offset);
+    const after = result.slice(offset + match.length, offset + match.length + 200);
+    const hasContentBefore = /\|[^|\s\-][^|]*\|/.test(before);
+    const hasContentAfter = /\|[^|\s\-][^|]*\|/.test(after);
+    return (hasContentBefore || hasContentAfter) ? match : '';
+  });
 
   // 4. Clean up consecutive empty lines
   result = result.replace(/\n{4,}/g, '\n\n\n');
