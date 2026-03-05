@@ -767,6 +767,26 @@ function formatHwpTextToMarkdown(text: string): string {
     }
 
     // Article headings: 제1조(목적) ...body
+    // Also handle mid-line article: "...이 규칙이 정하는 바에 따른다.제3조(사원의 정의)..."
+    const embeddedArticle = trimmed.match(/^(.+?)(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\)\s*.*)$/);
+    if (embeddedArticle && !trimmed.startsWith('제') && /제\s*\d+\s*조/.test(trimmed)) {
+      const before = embeddedArticle[1].trim();
+      const articlePart = embeddedArticle[2].trim();
+      if (before) result.push(before);
+      // Re-process the article part
+      const subMatch = articlePart.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
+      if (subMatch) {
+        const title = subMatch[1].replace(/\s+/g, ' ').trim();
+        const body = (subMatch[2] || '').trim();
+        result.push('', `#### ${title}`, '');
+        if (body) result.push(formatArticleBody(body));
+      } else {
+        result.push('', `#### ${articlePart}`, '');
+      }
+      lastWasHeading = true;
+      continue;
+    }
+
     const articleMatch = trimmed.match(/^(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))\s*([\s\S]*)/);
     if (articleMatch) {
       const title = articleMatch[1].replace(/\s+/g, ' ').trim();
@@ -896,9 +916,11 @@ function formatHwpTextToMarkdown(text: string): string {
     result.push(trimmed);
   }
 
-  return result.join('\n')
+  const joined = result.join('\n')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim() + '\n';
+
+  return finalCleanup(joined);
 }
 
 /**
@@ -909,8 +931,12 @@ function formatArticleBody(body: string): string {
   // Split on clause markers (①②③...)
   let result = body
     .replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)/g, '\n\n$1')
-    .replace(/\s{2,}(\d+\.)\s/g, '\n$1 ')
+    .replace(/(\d+\.)\s/g, '\n$1 ')
+    .replace(/([가나다라마바사아자차카타파하]\.)\s/g, '\n  $1 ')
     .trim();
+
+  // Also split embedded article headings (제X조 appearing mid-text)
+  result = result.replace(/(제\s*\d+\s*조(?:의\s*\d+)?\s*\([^)]+\))/g, '\n\n#### $1\n');
 
   const lines = result.split('\n');
   const formatted: string[] = [];
@@ -920,6 +946,30 @@ function formatArticleBody(body: string): string {
     formatted.push(t);
   }
   return formatted.join('\n');
+}
+
+/**
+ * Post-process final markdown to fix remaining issues
+ */
+function finalCleanup(md: string): string {
+  let result = md;
+
+  // 1. Split ☞ in annotations onto new lines (within blockquotes)
+  result = result.replace(/(\s)(☞\s*\(참고\))/g, '\n> $2');
+
+  // 2. Remove empty table cells: | | patterns
+  result = result.replace(/^\|\s*\|\s*$/gm, '');
+
+  // 3. Remove orphan table separators without content
+  result = result.replace(/^\|\s*---\s*\|\s*$/gm, '');
+
+  // 4. Clean up consecutive empty lines
+  result = result.replace(/\n{4,}/g, '\n\n\n');
+
+  // 5. Fix annotation lines that have table fragments mixed in
+  result = result.replace(/^>\s*\*\*착안사항\*\*:\s*\|\s*/gm, '> **착안사항**: ');
+
+  return result.trim() + '\n';
 }
 
 export async function OPTIONS() {
