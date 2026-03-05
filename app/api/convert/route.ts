@@ -785,33 +785,46 @@ function formatHwpTextToMarkdown(text: string): string {
       continue;
     }
 
-    // 착안사항 / annotation markers - expanded detection
-    const isAnnotationStart = /^◈/.test(trimmed)
-      || /^\[필수\]/.test(trimmed) || /^\[선택\]/.test(trimmed)
-      || /^\[필수,\s*선택\]/.test(trimmed) || /^\[선택,\s*필수\]/.test(trimmed)
-      || /^☞/.test(trimmed) || /^착안사항/.test(trimmed)
-      || /^※\s/.test(trimmed)
-      || (/\[필수\]|\[선택\]|\[필수,\s*선택\]|\[선택,\s*필수\]/.test(trimmed) && !/^제\s*\d+/.test(trimmed));
-    if (isAnnotationStart) {
-      result.push(`> **착안사항**: ${trimmed}`);
-      inAnnotation = true;
-      continue;
-    }
-
-    // Continuation of annotation block
+    // Continuation of annotation block (check BEFORE new annotation start)
     if (inAnnotation) {
-      const startsNewElement = /^제\s*\d+\s*(조|장|절)/.test(trimmed)
+      const breaksAnnotation = /^제\s*\d+\s*(조|장|절)/.test(trimmed)
         || /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]/.test(trimmed)
         || /^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/.test(trimmed)
         || /^부\s*칙/.test(trimmed)
         || /^\[?별지/.test(trimmed)
         || /^\|/.test(trimmed);
-      if (!startsNewElement) {
+
+      // New major annotation markers start a fresh blockquote header
+      const isNewAnnotation = /^◈/.test(trimmed)
+        || /^\[필수\]/.test(trimmed) || /^\[선택\]/.test(trimmed)
+        || /^\[필수,\s*선택\]/.test(trimmed) || /^\[선택,\s*필수\]/.test(trimmed)
+        || /^착안사항/.test(trimmed) || /^※\s/.test(trimmed)
+        || (/\[필수\]|\[선택\]|\[필수,\s*선택\]|\[선택,\s*필수\]/.test(trimmed) && !/^제\s*\d+/.test(trimmed));
+
+      if (breaksAnnotation) {
+        inAnnotation = false;
+        // Fall through to process as normal element
+      } else if (isNewAnnotation) {
+        result.push(`> **착안사항**: ${trimmed}`);
+        continue;
+      } else {
+        // ☞, *, -, · and other text continue in blockquote
         result.push(`> ${trimmed}`);
         continue;
       }
-      inAnnotation = false;
-      // Fall through to process as normal element
+    }
+
+    // 착안사항 / annotation markers - start new annotation block
+    const isAnnotationStart = /^◈/.test(trimmed)
+      || /^\[필수\]/.test(trimmed) || /^\[선택\]/.test(trimmed)
+      || /^\[필수,\s*선택\]/.test(trimmed) || /^\[선택,\s*필수\]/.test(trimmed)
+      || /^☞/.test(trimmed) || /^착안사항/.test(trimmed)
+      || /^※\s/.test(trimmed) || /^\(참고\)/.test(trimmed)
+      || (/\[필수\]|\[선택\]|\[필수,\s*선택\]|\[선택,\s*필수\]/.test(trimmed) && !/^제\s*\d+/.test(trimmed));
+    if (isAnnotationStart) {
+      result.push(`> **착안사항**: ${trimmed}`);
+      inAnnotation = true;
+      continue;
     }
 
     // "부 칙" or appendix
