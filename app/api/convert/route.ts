@@ -177,6 +177,71 @@ function convertCsvToMarkdown(csvContent: string): string {
 }
 
 /**
+ * Extract clean text from HWP-generated HTML
+ * Strips table layout markup and preserves content structure
+ * This avoids markitdown's faithful table conversion which makes layout tables unreadable
+ */
+function extractTextFromHwpHtml(html: string): string {
+  let text = html;
+
+  // Remove <head> section entirely
+  text = text.replace(/<head[\s\S]*?<\/head>/gi, '');
+
+  // Remove <style> and <script> tags
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, '');
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
+
+  // Convert <br> to newline
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+
+  // Add paragraph breaks at block boundaries
+  text = text.replace(/<\/p>/gi, '\n\n');
+  text = text.replace(/<\/div>/gi, '\n');
+  text = text.replace(/<\/h[1-6]>/gi, '\n\n');
+  text = text.replace(/<\/li>/gi, '\n');
+  text = text.replace(/<\/blockquote>/gi, '\n\n');
+
+  // Table cell boundaries → newline (key for HWP layout tables)
+  text = text.replace(/<\/td>/gi, '\n');
+  text = text.replace(/<\/th>/gi, '\n');
+
+  // Table row boundaries → double newline (paragraph break)
+  text = text.replace(/<\/tr>/gi, '\n\n');
+
+  // Table start/end → paragraph break
+  text = text.replace(/<\/?table[^>]*>/gi, '\n\n');
+  text = text.replace(/<\/?tbody[^>]*>/gi, '');
+  text = text.replace(/<\/?thead[^>]*>/gi, '');
+
+  // Strip all remaining HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+
+  // Decode HTML entities
+  text = text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#8203;/g, '')          // Zero-width space
+    .replace(/&#x200B;/g, '')         // Zero-width space (hex)
+    .replace(/&#(\d+);/g, (_, code) => {
+      const n = parseInt(code, 10);
+      return n > 31 && n < 127 ? String.fromCharCode(n) : '';
+    });
+
+  // Clean up whitespace
+  text = text
+    .replace(/[ \t]+/g, ' ')           // Collapse horizontal whitespace
+    .replace(/^ +| +$/gm, '')          // Trim each line
+    .replace(/\n{3,}/g, '\n\n')        // Max 2 consecutive newlines
+    .trim();
+
+  return text;
+}
+
+/**
  * Parse a markdown table row into cells, handling escaped pipes
  */
 function parseTableRow(row: string): string[] {
@@ -709,36 +774,37 @@ export async function POST(request: NextRequest) {
       tempHtmlPath = join(tempDir, `${tempId}.html`);
       const hwpToolAvailable = !!hwp5htmlBin;
       if (!hwpToolAvailable) {
-        // Proxy to Render backend (has hwp5html/hwp5txt in Docker)
         return proxyToRender(file);
       }
 
-      // Strategy: hwp5txt FIRST (produces cleaner, table-free text)
-      // then hwp5html + markitdown as fallback
-      try {
-        const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
-        if (hwpText && hwpText.trim().length > 100) {
-          const markdown = formatHwpTextToMarkdown(hwpText);
-          return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
-        }
-      } catch { /* hwp5txt failed, try hwp5html */ }
-
-      // Fallback: hwp5html → markitdown/turndown → postProcess
+      // Strategy: hwp5html → custom HTML text extraction → formatHwpTextToMarkdown
+      // This avoids markitdown's table preservation which makes HWP layout tables unreadable
       try {
         await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
-        const markitdownBin = await checkMarkitdown();
-        let markdown: string;
-        if (markitdownBin) {
-          const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
-          markdown = postProcessHwpMarkdown(stdout);
-        } else {
-          const htmlContent = await readFile(tempHtmlPath, 'utf-8');
-          markdown = postProcessHwpMarkdown(await convertHtmlToMarkdown(htmlContent));
-        }
+        const htmlContent = await readFile(tempHtmlPath, 'utf-8');
+        const plainText = extractTextFromHwpHtml(htmlContent);
+        const markdown = formatHwpTextToMarkdown(plainText);
         return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
-      } catch (hwpError: unknown) {
-        const msg = hwpError instanceof Error ? hwpError.message : 'Unknown error';
-        return jsonWithCors({ error: `HWP 변환 오류: ${msg}` }, 500);
+      } catch {
+        // Fallback 1: hwp5txt
+        try {
+          const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
+          if (hwpText && hwpText.trim().length > 200) {
+            const markdown = formatHwpTextToMarkdown(hwpText);
+            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+          }
+        } catch { /* hwp5txt also failed */ }
+        // Fallback 2: markitdown (original path)
+        try {
+          await execFileAsync(hwp5htmlBin, ['--html', tempPath, '--output', tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
+          const markitdownBin = await checkMarkitdown();
+          if (markitdownBin) {
+            const { stdout } = await execFileAsync(markitdownBin, [tempHtmlPath], { timeout: 120000, maxBuffer: 100 * 1024 * 1024, env: ENV });
+            const markdown = postProcessHwpMarkdown(stdout);
+            return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+          }
+        } catch { /* */ }
+        return jsonWithCors({ error: 'HWP 변환 오류: 모든 변환 방법이 실패했습니다.' }, 500);
       }
     }
 
