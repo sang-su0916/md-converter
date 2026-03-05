@@ -176,18 +176,241 @@ function convertCsvToMarkdown(csvContent: string): string {
   return [header, separator, body].join('\n') + '\n';
 }
 
-function postProcessHwpMarkdown(md: string): string {
-  let result = md.replace(/^-\s*\d+\s*-\s*$/gm, '').replace(/^#{1,6}\s*$/gm, '').replace(/\n{4,}/g, '\n\n\n').replace(/\[autonumbering[^\]]*\]/g, '').replace(/[ \t]+$/gm, '');
-  const lines = result.split('\n'); const processed: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) { processed.push(''); continue; }
-    if (/^제\d+장\s+/.test(trimmed) && !trimmed.includes('|') && trimmed.length < 30) { processed.push(`## ${trimmed}`); continue; }
-    if (/^제\d+조[\s(（]/.test(trimmed) && !trimmed.includes('|') && trimmed.length < 30) { processed.push(`### ${trimmed}`); continue; }
-    if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed) && !trimmed.includes('|')) { processed.push(`# ${trimmed}`); continue; }
-    processed.push(line);
+/**
+ * Parse a markdown table row into cells, handling escaped pipes
+ */
+function parseTableRow(row: string): string[] {
+  const inner = row.replace(/^\|/, '').replace(/\|$/, '');
+  return inner.split('|').map(c => c.trim());
+}
+
+/**
+ * Check if a line is a markdown table separator (| --- | --- |)
+ */
+function isTableSeparator(line: string): boolean {
+  return /^\|[\s\-:]+(\|[\s\-:]+)+\|?$/.test(line.trim());
+}
+
+/**
+ * Detect if a table is a 2-column legal document layout table
+ * (조문 on left, 착안사항/참고 on right)
+ */
+function isLegalLayoutTable(rows: string[][]): boolean {
+  if (rows.length < 3) return false;
+  const cols = rows[0]?.length || 0;
+  if (cols !== 2) return false;
+  // Check if content matches legal document patterns
+  let legalPatterns = 0;
+  for (const row of rows) {
+    const left = row[0] || '';
+    const right = row[1] || '';
+    if (/제\d+조/.test(left) || /제\d+장/.test(left) || /제\d+절/.test(left)) legalPatterns++;
+    if (/\[필수\]|\[선택\]|착안사항|참고\)|☞/.test(right)) legalPatterns++;
   }
-  return processed.join('\n').trim() + '\n';
+  return legalPatterns >= 3;
+}
+
+/**
+ * Convert a legal layout table into structured markdown
+ */
+function convertLegalTable(rows: string[][]): string {
+  const output: string[] = [];
+
+  for (const row of rows) {
+    const left = (row[0] || '').trim();
+    const right = (row[1] || '').trim();
+
+    if (!left && !right) continue;
+
+    // Skip header rows like "취업규칙(안) | (작성시 착안사항)"
+    if (/^취업규칙/.test(left) && /착안사항/.test(right)) continue;
+    if (/^취업규칙/.test(left) && /^취업규칙/.test(right)) continue;
+
+    // Chapter heading: 제X장
+    const chapterMatch = left.match(/^(제\d+장\s+.+?)$/);
+    if (chapterMatch && left.length < 50 && !/제\d+조/.test(left)) {
+      output.push('', `## ${chapterMatch[1].trim()}`, '');
+      if (right && right.length > 5) {
+        output.push(`> **착안사항**: ${right}`, '');
+      }
+      continue;
+    }
+
+    // Section heading: 제X절
+    const sectionMatch = left.match(/^(제\d+절\s+.+?)$/);
+    if (sectionMatch && left.length < 50) {
+      output.push('', `### ${sectionMatch[1].trim()}`, '');
+      if (right && right.length > 5) {
+        output.push(`> ${right}`, '');
+      }
+      continue;
+    }
+
+    // Article: 제X조(제목) + body text
+    const articleMatch = left.match(/^(제\d+조(?:의\d+)?\([^)]+\))\s*([\s\S]*)/);
+    if (articleMatch) {
+      const title = articleMatch[1].trim();
+      let body = articleMatch[2].trim();
+
+      output.push('', `#### ${title}`, '');
+
+      if (body) {
+        // Split body into paragraphs by clause markers
+        body = formatLegalBody(body);
+        output.push(body, '');
+      }
+
+      if (right && right.length > 5) {
+        output.push(`> **착안사항**: ${right}`, '');
+      }
+      continue;
+    }
+
+    // TOC or other structured content - just output as text
+    if (left) {
+      // Check if it's a TOC block (contains multiple 제X조 references)
+      const articleRefs = left.match(/제\d+조/g);
+      if (articleRefs && articleRefs.length > 3) {
+        // It's a TOC block - format as list
+        const tocLines = left.split(/\s{2,}/).filter(l => l.trim());
+        for (const tocLine of tocLines) {
+          const tl = tocLine.trim();
+          if (/^제\d+장/.test(tl)) output.push(`\n**${tl}**`);
+          else if (/^제\d+절/.test(tl)) output.push(`  *${tl}*`);
+          else if (/^제\d+조/.test(tl)) output.push(`  - ${tl}`);
+          else output.push(`  ${tl}`);
+        }
+      } else {
+        output.push(left);
+      }
+    }
+
+    if (right && right.length > 5 && !left.includes(right)) {
+      // Standalone right column content (착안사항 without left content)
+      if (/^\[필수\]|\[선택\]|☞|참고/.test(right)) {
+        output.push(`> ${right}`);
+      } else {
+        output.push(right);
+      }
+    }
+  }
+
+  return output.join('\n');
+}
+
+/**
+ * Format legal body text with proper paragraph breaks
+ */
+function formatLegalBody(text: string): string {
+  // Insert line breaks before clause markers
+  let result = text
+    .replace(/\s+(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)/g, '\n\n$1')
+    .replace(/\s+(\d+\.)\s/g, '\n$1 ')
+    .trim();
+
+  // Format numbered items
+  const lines = result.split('\n');
+  const formatted: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) { formatted.push(''); continue; }
+    formatted.push(t);
+  }
+  return formatted.join('\n');
+}
+
+/**
+ * Enhanced post-processing for HWP → Markdown conversion
+ * Handles legal document layout tables, chapter/article headings,
+ * and general HWP formatting artifacts
+ */
+function postProcessHwpMarkdown(md: string): string {
+  // Phase 1: Clean up common HWP artifacts
+  let result = md
+    .replace(/^-\s*\d+\s*-\s*$/gm, '')        // Page numbers like "- 7 -"
+    .replace(/^#{1,6}\s*$/gm, '')               // Empty headings
+    .replace(/\[autonumbering[^\]]*\]/g, '')    // Auto-numbering markers
+    .replace(/[ \t]+$/gm, '');                  // Trailing whitespace
+
+  // Phase 2: Detect and convert legal layout tables
+  const lines = result.split('\n');
+  const segments: { type: 'text' | 'table'; lines: string[] }[] = [];
+  let currentSegment: { type: 'text' | 'table'; lines: string[] } = { type: 'text', lines: [] };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const isTableRow = /^\|.*\|$/.test(line);
+
+    if (isTableRow || isTableSeparator(line)) {
+      if (currentSegment.type !== 'table') {
+        if (currentSegment.lines.length > 0) segments.push(currentSegment);
+        currentSegment = { type: 'table', lines: [] };
+      }
+      if (!isTableSeparator(line)) {
+        currentSegment.lines.push(line);
+      }
+    } else {
+      if (currentSegment.type !== 'text') {
+        if (currentSegment.lines.length > 0) segments.push(currentSegment);
+        currentSegment = { type: 'text', lines: [] };
+      }
+      currentSegment.lines.push(lines[i]);
+    }
+  }
+  if (currentSegment.lines.length > 0) segments.push(currentSegment);
+
+  // Phase 3: Process each segment
+  const output: string[] = [];
+
+  for (const seg of segments) {
+    if (seg.type === 'table') {
+      const parsedRows = seg.lines.map(parseTableRow);
+
+      if (isLegalLayoutTable(parsedRows)) {
+        // Convert legal layout table to structured markdown
+        output.push(convertLegalTable(parsedRows));
+      } else {
+        // Keep non-legal tables as-is (data tables, form tables, etc.)
+        // But clean them up
+        for (const line of seg.lines) {
+          output.push(line);
+        }
+      }
+    } else {
+      // Process text lines
+      for (const line of seg.lines) {
+        const trimmed = line.trim();
+        if (!trimmed) { output.push(''); continue; }
+
+        // Chapter headings
+        if (/^제\d+장\s+/.test(trimmed) && trimmed.length < 40) {
+          output.push('', `## ${trimmed}`, '');
+          continue;
+        }
+        // Section headings
+        if (/^제\d+절\s+/.test(trimmed) && trimmed.length < 40) {
+          output.push('', `### ${trimmed}`, '');
+          continue;
+        }
+        // Article headings
+        if (/^제\d+조(?:의\d+)?\(/.test(trimmed) && trimmed.length < 40) {
+          output.push('', `#### ${trimmed}`, '');
+          continue;
+        }
+        // Roman numeral headings
+        if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][\.\s]/.test(trimmed) && !trimmed.includes('|')) {
+          output.push('', `# ${trimmed}`, '');
+          continue;
+        }
+
+        output.push(line);
+      }
+    }
+  }
+
+  return output.join('\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim() + '\n';
 }
 
 function formatHwpTextToMarkdown(text: string): string {
