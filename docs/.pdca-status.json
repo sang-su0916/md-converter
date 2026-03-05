@@ -1,0 +1,77 @@
+{
+  "version": "2.0",
+  "lastUpdated": "2026-03-05T05:41:05.316Z",
+  "activeFeatures": [
+    "convert"
+  ],
+  "primaryFeature": "convert",
+  "features": {
+    "convert": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-03-05T05:37:14.990Z",
+        "lastUpdated": "2026-03-05T05:41:05.316Z"
+      },
+      "lastFile": "/Users/isangsu/.openclaw/workspace/artifacts/md-converter/app/api/convert/route.ts"
+    }
+  },
+  "pipeline": {
+    "currentPhase": 1,
+    "level": "Dynamic",
+    "phaseHistory": []
+  },
+  "session": {
+    "startedAt": "2026-03-05T05:32:05.629Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-03-05T05:41:05.316Z"
+  },
+  "history": [
+    {
+      "timestamp": "2026-03-05T05:37:14.990Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-03-05T05:37:24.342Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-03-05T05:37:50.871Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-03-05T05:38:07.641Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-03-05T05:38:14.279Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-03-05T05:38:23.370Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-03-05T05:41:05.316Z",
+      "feature": "convert",
+      "phase": "do",
+      "action": "updated"
+    }
+  ]
+}

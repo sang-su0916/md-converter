@@ -89,7 +89,8 @@ async function checkMarkitdown(): Promise<string | null> {
 async function convertPdfToMarkdown(filePath: string): Promise<string> {
   // Strategy 1: pdf-parse (stable on serverless)
   try {
-    const pdfParse = (await import('pdf-parse')).default;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse');
     const buffer = await readFile(filePath);
     const result = await pdfParse(buffer);
     if (result.text && result.text.trim().length > 0) {
