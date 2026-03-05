@@ -187,10 +187,16 @@ function formatPdfText(text: string): string {
       continue;
     }
 
-    // Short standalone lines ending with "은" "는" "의" (Korean topic markers - likely section titles)
-    if (trimmed.length < 50 && /[은는의]$/.test(trimmed) && formatted[formatted.length - 1] === '') {
-      formatted.push(`## ${trimmed}`, '');
-      continue;
+    // Short standalone lines ending with "은" "는" "의" "금" (Korean topic markers - likely section titles)
+    if (trimmed.length > 3 && trimmed.length < 60 && /[은는의금]$/.test(trimmed)
+        && !trimmed.includes(',') && !trimmed.includes(';')) {
+      // Check if surrounded by blank lines or at boundaries
+      const prevBlank = formatted.length === 0 || formatted[formatted.length - 1] === '';
+      const isLikelyHeading = prevBlank || trimmed.includes('장려금') || trimmed.includes('지원금');
+      if (isLikelyHeading) {
+        formatted.push('', `## ${trimmed}`, '');
+        continue;
+      }
     }
 
     // Circled number items: ① ② etc.
@@ -312,11 +318,14 @@ async function convertHtmlToMarkdown(htmlContent: string): Promise<string> {
       }
     }
 
-    // Korean section markers ending with 은/는/의 (standalone lines)
-    if (trimmed.length > 5 && trimmed.length < 60 && /[은는의]$/.test(trimmed)
-        && (i === 0 || lines[i - 1].trim() === '')) {
-      result.push('', `## ${trimmed}`, '');
-      continue;
+    // Korean section markers ending with 은/는/의/다 (standalone lines)
+    if (trimmed.length > 3 && trimmed.length < 80 && /[은는의다]$/.test(trimmed)
+        && !trimmed.includes(',') && !trimmed.includes('@')) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '';
+      if (prevBlank) {
+        result.push('', `## ${trimmed}`, '');
+        continue;
+      }
     }
 
     // All-caps lines (likely headings)
