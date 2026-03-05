@@ -118,7 +118,11 @@ async function convertPdfToMarkdown(filePath: string): Promise<string> {
   if (!rawText) return '';
 
   // Post-process: structure the raw text into readable markdown
-  return formatPdfText(rawText);
+  const formatted = formatPdfText(rawText);
+  // DEBUG: check if headings were inserted
+  const debugHeadings = formatted.split('\n').filter(l => l.startsWith('#')).length;
+  console.log(`[PDF DEBUG] rawText lines: ${rawText.split('\n').length}, formatted lines: ${formatted.split('\n').length}, headings: ${debugHeadings}`);
+  return formatted;
 }
 
 /**
@@ -1310,8 +1314,11 @@ export async function POST(request: NextRequest) {
     }
 
     let markdown = '';
+    let _pdfDebug = '';
     if (PDF_EXTENSIONS.includes(ext)) {
       markdown = await convertPdfToMarkdown(tempPath);
+      const pdfHeadings = markdown.split('\n').filter(l => l.startsWith('#')).length;
+      _pdfDebug = `path=convertPdfToMarkdown,headings=${pdfHeadings},lines=${markdown.split('\n').length}`;
       // PDF 로컬 변환 실패 시 Render 백엔드로 프록시
       if (!markdown || markdown.trim().length === 0) {
         return proxyToRender(file);
@@ -1332,7 +1339,7 @@ export async function POST(request: NextRequest) {
       return proxyToRender(file);
     }
 
-    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+    return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length, _pdfDebug });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     if (message.includes('timeout')) return jsonWithCors({ error: '변환 시간이 초과되었습니다.' }, 504);
