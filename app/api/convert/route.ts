@@ -536,6 +536,48 @@ function postProcessCsvMarkdown(md: string, filename: string): string {
 }
 
 /**
+ * Extract headings from table rows (for form documents)
+ * e.g., | 본점주소 | ... | → ## 본점주소
+ */
+function extractTableFieldHeadings(md: string): string {
+  const lines = md.split('\n');
+  const result: string[] = [];
+  const seen = new Set<string>();
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Detect table row with field label pattern: | FieldName | ... |
+    if (line.includes('|')) {
+      const cells = line.split('|').map(c => c.trim()).filter(c => c.length > 0);
+      
+      // First cell looks like a field label (Korean, 2-12 chars, no long text)
+      if (cells.length > 0) {
+        const first = cells[0];
+        const korean = /[가-힣]/.test(first);
+        const short = first.length >= 2 && first.length <= 20;
+        const notSentence = !first.includes('.') && !first.includes('?');
+        const isLabel = korean && short && notSentence;
+        
+        // Field label patterns: "본점주소", "자본금", "사업목적(업종)"
+        if (isLabel && !seen.has(first)) {
+          const cleanLabel = first.replace(/\([^)]+\)/g, '').trim(); // Remove (괄호)
+          if (cleanLabel.length >= 2 && cleanLabel.length <= 12) {
+            result.push(`### ${cleanLabel}`);
+            result.push('');
+            seen.add(first);
+          }
+        }
+      }
+    }
+    
+    result.push(line);
+  }
+  
+  return result.join('\n');
+}
+
+/**
  * Post-process TXT: detect paragraphs and potential headings
  */
 function postProcessTxtMarkdown(md: string, filename: string): string {
@@ -1622,6 +1664,10 @@ export async function POST(request: NextRequest) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
           } else if (['.docx', '.doc', '.pptx', '.ppt', '.hwp'].includes(ext)) {
             data.markdown = postProcessPdfMarkdown(data.markdown);
+            // HWP form docs: extract field headings from table rows
+            if (ext === '.hwp') {
+              data.markdown = extractTableFieldHeadings(data.markdown);
+            }
           } else if (ext === '.csv') {
             data.markdown = postProcessCsvMarkdown(data.markdown, file.name);
           } else if (ext === '.txt') {
@@ -1726,7 +1772,9 @@ export async function POST(request: NextRequest) {
             conversionMethod = 'hwp5html→markitdown→tableToText';
             // Convert markdown tables to plain text, then apply HWP formatter
             const textWithoutTables = convertLayoutTablesToText(stdout);
-            const markdown = formatHwpTextToMarkdown(textWithoutTables);
+            let markdown = formatHwpTextToMarkdown(textWithoutTables);
+            // Extract field headings from table rows
+            markdown = extractTableFieldHeadings(markdown);
             return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret5-L1435", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, htmlSize, markitdownSize: stdout.length, textSize: textWithoutTables.length } });
           }
         }
@@ -1737,7 +1785,8 @@ export async function POST(request: NextRequest) {
         const { stdout: hwpText } = await execFileAsync(hwp5txtBin, [tempPath], { timeout: 60000, maxBuffer: 50 * 1024 * 1024, env: ENV });
         if (hwpText && hwpText.trim().length > 200) {
           conversionMethod = 'hwp5txt';
-          const markdown = formatHwpTextToMarkdown(hwpText);
+          let markdown = formatHwpTextToMarkdown(hwpText);
+          markdown = extractTableFieldHeadings(markdown);
           return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, _v: "ret6-L1446", lineCount: markdown.split('\n').length, charCount: markdown.length, _debug: { method: conversionMethod, hwp5txtSize: hwpText.length, htmlSize, plainTextSize } });
         }
       } catch { /* hwp5txt also failed */ }
