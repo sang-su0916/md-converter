@@ -429,6 +429,12 @@ function postProcessPdfMarkdown(md: string): string {
       continue;
     }
 
+    // Korean ordinal patterns as list items: "첫 번째 ..:", "두 번째 ..:", etc.
+    if (/^(첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*번째\s/.test(trimmed) && trimmed.length < 200) {
+      result.push(`- ${trimmed}`);
+      continue;
+    }
+
     // Filled circled numbers: ❶ ❷ etc.
     if (/^[❶❷❸❹❺❻❼❽❾❿]/.test(trimmed) && trimmed.length < 120) {
       result.push('', trimmed);
@@ -496,6 +502,9 @@ function postProcessPdfMarkdown(md: string): string {
       text = text.replace(/\)\s+([①②③④⑤⑥⑦⑧⑨⑩❶❷❸❹❺])/g, ')\n\n$1');
       // Split at Roman numeral chapter markers
       text = text.replace(/\s+([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]\.)/g, '\n\n# $1');
+      // Split ". text" list items embedded in lines (PDF artifact)
+      text = text.replace(/\s+\.\s+(")/g, '\n- $1');
+      text = text.replace(/\s+\.\s*$/gm, '\n');
       
       // If still > 250 chars after above splits, apply comma/semicolon splitting
       const segments = text.split('\n');
