@@ -308,10 +308,31 @@ function postProcessPdfMarkdown(md: string): string {
       continue;
     }
 
-    // Short standalone lines ending with topic markers (은/는/의/금)
-    if (trimmed.length > 3 && trimmed.length < 60 && /[은는금]$/.test(trimmed)) {
+    // Short standalone lines ending with topic markers (은/는/의/금/다/요)
+    if (trimmed.length > 3 && trimmed.length < 60 && /[은는금다요]$/.test(trimmed)) {
       const prevBlank = i === 0 || lines[i - 1].trim() === '' || lines[i - 1].trim() === '\f';
-      const nextBlank = i === lines.length - 1 || lines[i + 1].trim() === '';
+      const nextBlank = i === lines.length - 1 || lines[i + 1]?.trim() === '';
+      if (prevBlank && nextBlank) {
+        result.push('', `## ${trimmed}`, '');
+        continue;
+      }
+    }
+
+    // Short standalone lines ending with ? (questions as sections)
+    if (trimmed.length > 5 && trimmed.length < 60 && trimmed.endsWith('?')) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '' || lines[i - 1].trim() === '\f';
+      const nextBlank = i === lines.length - 1 || lines[i + 1]?.trim() === '';
+      if (prevBlank && nextBlank) {
+        result.push('', `## ${trimmed}`, '');
+        continue;
+      }
+    }
+
+    // Very short standalone Korean lines (3-20 chars, isolated) — likely section titles
+    if (trimmed.length >= 3 && trimmed.length <= 25 && /[가-힣]/.test(trimmed) 
+        && !/[.,;:!]$/.test(trimmed) && !/^\d/.test(trimmed) && !/^[-*•]/.test(trimmed)) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '' || lines[i - 1].trim() === '\f';
+      const nextBlank = i === lines.length - 1 || lines[i + 1]?.trim() === '';
       if (prevBlank && nextBlank) {
         result.push('', `## ${trimmed}`, '');
         continue;
@@ -458,7 +479,7 @@ function postProcessHtmlMarkdown(md: string): string {
 function convertXmlToMarkdown(xmlContent: string): string {
   const result: string[] = [];
   // Remove XML declaration
-  let xml = xmlContent.replace(/<\?xml[^?]*\?>/g, '').trim();
+  const xml = xmlContent.replace(/<\?xml[^?]*\?>/g, '').trim();
   
   // Extract root element name for title
   const rootMatch = xml.match(/^<([^\s/>]+)/);
@@ -468,35 +489,35 @@ function convertXmlToMarkdown(xmlContent: string): string {
   
   // Convert XML tags to structured markdown
   const tagStack: string[] = [];
-  const tagRegex = /<\/?([^\s/>]+)[^>]*>|([^<]+)/g;
+  const tagRegex = /<\/([^\s>]+)>|<([^\s/>]+)[^>]*\/?>|([^<]+)/g;
   let match;
   
   while ((match = tagRegex.exec(xml)) !== null) {
-    const fullMatch = match[0];
-    const textContent = match[2]?.trim();
+    const closingTag = match[1];
+    const openingTag = match[2];
+    const textContent = match[3]?.trim();
     
     if (textContent) {
       // Text content
       const depth = tagStack.length;
-      const prefix = depth > 1 ? '  '.repeat(depth - 1) + '- ' : '';
+      const prefix = depth > 1 ? '  '.repeat(Math.min(depth - 1, 5)) + '- ' : '';
       const label = tagStack.length > 0 ? tagStack[tagStack.length - 1] : '';
       if (label && textContent.length < 200) {
         result.push(`${prefix}**${label}**: ${textContent}`);
-      } else if (textContent) {
+      } else {
         result.push(`${prefix}${textContent}`);
       }
-    } else if (fullMatch.startsWith('</')) {
+    } else if (closingTag) {
       // Closing tag
       tagStack.pop();
-    } else if (!fullMatch.endsWith('/>')) {
+    } else if (openingTag) {
       // Opening tag
-      const tagName = match[1];
       const depth = tagStack.length;
       // Major sections get headings
-      if (depth === 1 && tagName.length > 2) {
-        result.push('', `## ${tagName}`, '');
+      if (depth <= 1 && openingTag.length > 2) {
+        result.push('', `## ${openingTag}`, '');
       }
-      tagStack.push(tagName);
+      tagStack.push(openingTag);
     }
   }
   
