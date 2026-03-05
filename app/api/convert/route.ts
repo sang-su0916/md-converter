@@ -32,7 +32,8 @@ const HWP_EXTENSIONS = ['.hwp', '.hwpx'];
 const TEXT_EXTENSIONS = ['.txt', '.md', '.rst', '.log'];
 const PDF_EXTENSIONS = ['.pdf'];
 const OFFICE_EXTENSIONS = ['.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.rtf', '.epub'];
-const HTML_EXTENSIONS = ['.html', '.htm', '.xml'];
+const HTML_EXTENSIONS = ['.html', '.htm'];
+const XML_EXTENSIONS = ['.xml'];
 
 function getExtension(filename: string): string {
   const idx = filename.lastIndexOf('.');
@@ -317,8 +318,53 @@ function postProcessPdfMarkdown(md: string): string {
       }
     }
 
-    // ALL-CAPS short lines
-    if (trimmed.length > 3 && trimmed.length < 50 && /^[A-Z\s]+$/.test(trimmed)) {
+    // ALL-CAPS short lines (e.g., "P R E M I U M   G U I D E")
+    if (trimmed.length > 3 && trimmed.length < 80 && /^[A-Z\s]+$/.test(trimmed)) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // TOC-style numbered items: "01  제목" or "02  뭔가요?"
+    if (/^\d{2}\s{2,}/.test(trimmed) && trimmed.length < 80) {
+      result.push('', `## ${trimmed}`, '');
+      continue;
+    }
+
+    // Angle bracket titles: <유연근무 장려금> etc.
+    if (/^<[^>]+>$/.test(trimmed) && trimmed.length < 60) {
+      const title = trimmed.slice(1, -1);
+      result.push('', `### ${title}`, '');
+      continue;
+    }
+
+    // Emoji numbered headings: 1️⃣, 🚨, ✅, 💡, 📌, 💰 etc. (short standalone)
+    if (/^[\u{1F1E6}-\u{1F9FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/u.test(trimmed) 
+        && trimmed.length < 80) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '' || lines[i - 1].trim() === '\f';
+      if (prevBlank) {
+        result.push('', `## ${trimmed}`, '');
+        continue;
+      }
+    }
+
+    // Korean government doc patterns: "고용노동부 공고 제XXXX호"
+    if (/^(고용노동부|국세청|중소벤처기업부|기획재정부)\s*(공고|고시|훈령)/.test(trimmed)) {
+      result.push('', `# ${trimmed}`, '');
+      continue;
+    }
+
+    // Bold markers in text: **제목** standalone
+    if (/^\*\*[^*]+\*\*$/.test(trimmed) && trimmed.length < 100) {
+      const title = trimmed.replace(/\*\*/g, '');
+      const prevBlank = i === 0 || lines[i - 1].trim() === '';
+      if (prevBlank && title.length > 3) {
+        result.push('', `## ${title}`, '');
+        continue;
+      }
+    }
+
+    // Numbered Korean document headings: "1. 지원유형별" (allow more chars)
+    if (/^\d+\.\s/.test(trimmed) && trimmed.length >= 80 && trimmed.length < 120 && !/[,;]/.test(trimmed.slice(0, 30))) {
       result.push('', `## ${trimmed}`, '');
       continue;
     }
@@ -331,6 +377,12 @@ function postProcessPdfMarkdown(md: string): string {
 
     // Circled numbers
     if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) {
+      result.push('', trimmed);
+      continue;
+    }
+
+    // Filled circled numbers: ❶ ❷ etc.
+    if (/^[❶❷❸❹❺❻❼❽❾❿]/.test(trimmed) && trimmed.length < 120) {
       result.push('', trimmed);
       continue;
     }
@@ -358,18 +410,38 @@ function postProcessHtmlMarkdown(md: string): string {
       continue;
     }
 
-    // FROM THE CEO, NEWSLETTER etc.
-    if (/^(FROM THE|NEWSLETTER|SPRING|SUMMER|FALL|WINTER)\s/i.test(trimmed) && trimmed.length < 60) {
+    // FROM THE CEO, NEWSLETTER, section titles
+    if (/^(FROM THE|NEWSLETTER|SPRING|SUMMER|FALL|WINTER|PREMIUM|GUIDE)\b/i.test(trimmed) && trimmed.length < 60) {
       result.push('', `## ${trimmed}`, '');
       continue;
     }
 
-    // Standalone bold lines → section headings
+    // Standalone bold lines → section headings (relaxed: no need for prevBlank)
     if (/^\*\*[^*]+\*\*$/.test(trimmed) && trimmed.length < 100 && !trimmed.includes('http')) {
       const title = trimmed.replace(/\*\*/g, '');
-      const prevBlank = i === 0 || lines[i - 1].trim() === '';
-      if (prevBlank && title.length > 3 && title.length < 80) {
+      if (title.length > 3 && title.length < 80) {
         result.push('', `## ${title}`, '');
+        continue;
+      }
+    }
+
+    // Bold at start of line (partial bold): **제목:** 설명
+    if (/^\*\*[^*]+\*\*/.test(trimmed) && trimmed.length < 120 && !trimmed.includes('http')) {
+      const boldMatch = trimmed.match(/^\*\*([^*]+)\*\*/);
+      if (boldMatch && boldMatch[1].length < 30) {
+        const prevBlank = i === 0 || lines[i - 1].trim() === '';
+        if (prevBlank) {
+          result.push('', `### ${boldMatch[1]}`, '', trimmed.slice(boldMatch[0].length).trim());
+          continue;
+        }
+      }
+    }
+
+    // Emoji-prefixed short lines: 💡 절세 TIP, 📅 날짜 등
+    if (/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}]/u.test(trimmed) && trimmed.length < 60) {
+      const prevBlank = i === 0 || lines[i - 1].trim() === '';
+      if (prevBlank) {
+        result.push('', `### ${trimmed}`, '');
         continue;
       }
     }
@@ -377,6 +449,57 @@ function postProcessHtmlMarkdown(md: string): string {
     result.push(lines[i]);
   }
 
+  return result.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+}
+
+/**
+ * Convert XML to structured markdown
+ */
+function convertXmlToMarkdown(xmlContent: string): string {
+  const result: string[] = [];
+  // Remove XML declaration
+  let xml = xmlContent.replace(/<\?xml[^?]*\?>/g, '').trim();
+  
+  // Extract root element name for title
+  const rootMatch = xml.match(/^<([^\s/>]+)/);
+  if (rootMatch) {
+    result.push(`# ${rootMatch[1]}`, '');
+  }
+  
+  // Convert XML tags to structured markdown
+  const tagStack: string[] = [];
+  const tagRegex = /<\/?([^\s/>]+)[^>]*>|([^<]+)/g;
+  let match;
+  
+  while ((match = tagRegex.exec(xml)) !== null) {
+    const fullMatch = match[0];
+    const textContent = match[2]?.trim();
+    
+    if (textContent) {
+      // Text content
+      const depth = tagStack.length;
+      const prefix = depth > 1 ? '  '.repeat(depth - 1) + '- ' : '';
+      const label = tagStack.length > 0 ? tagStack[tagStack.length - 1] : '';
+      if (label && textContent.length < 200) {
+        result.push(`${prefix}**${label}**: ${textContent}`);
+      } else if (textContent) {
+        result.push(`${prefix}${textContent}`);
+      }
+    } else if (fullMatch.startsWith('</')) {
+      // Closing tag
+      tagStack.pop();
+    } else if (!fullMatch.endsWith('/>')) {
+      // Opening tag
+      const tagName = match[1];
+      const depth = tagStack.length;
+      // Major sections get headings
+      if (depth === 1 && tagName.length > 2) {
+        result.push('', `## ${tagName}`, '');
+      }
+      tagStack.push(tagName);
+    }
+  }
+  
   return result.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
 }
 
@@ -1332,13 +1455,19 @@ export async function POST(request: NextRequest) {
       const file = formData.get('file') as File | null;
       if (!file) return jsonWithCors({ error: '파일을 선택해 주세요.' }, 400);
 
-      // HTML은 Vercel 로컬에서 직접 처리 (Render HTML 변환 품질 낮음)
+      // HTML/XML은 Vercel 로컬에서 직접 처리
       const ext = file.name.lastIndexOf('.') >= 0 ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
       if (HTML_EXTENSIONS.includes(ext)) {
         const htmlBytes = await file.arrayBuffer();
         const htmlContent = new TextDecoder('utf-8').decode(htmlBytes);
         let markdown = await convertHtmlToMarkdown(htmlContent);
         markdown = postProcessHtmlMarkdown(markdown);
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
+      } else if (XML_EXTENSIONS.includes(ext)) {
+        const xmlBytes = await file.arrayBuffer();
+        const xmlContent = new TextDecoder('utf-8').decode(xmlBytes);
+        const markdown = convertXmlToMarkdown(xmlContent);
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
         return jsonWithCors({ markdown, filename: file.name.replace(/\.[^.]+$/, '.md'), originalName: file.name, fileSize: `${fileSizeMB} MB`, lineCount: markdown.split('\n').length, charCount: markdown.length });
       } else {
@@ -1353,9 +1482,13 @@ export async function POST(request: NextRequest) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await res.json() as any;
         
-        // Post-process Render response for PDF
-        if (data.markdown && PDF_EXTENSIONS.includes(ext)) {
-          data.markdown = postProcessPdfMarkdown(data.markdown);
+        // Post-process Render response
+        if (data.markdown) {
+          if (PDF_EXTENSIONS.includes(ext)) {
+            data.markdown = postProcessPdfMarkdown(data.markdown);
+          } else if (['.docx', '.doc', '.pptx', '.ppt', '.hwp'].includes(ext)) {
+            data.markdown = postProcessPdfMarkdown(data.markdown);
+          }
           data.lineCount = data.markdown.split('\n').length;
           data.charCount = data.markdown.length;
         }
@@ -1473,7 +1606,7 @@ export async function POST(request: NextRequest) {
 
     const markitdownBin = await checkMarkitdown();
     // Skip markitdown for PDF and HTML — use our custom processors for better structure
-    if (markitdownBin && !PDF_EXTENSIONS.includes(ext) && !HTML_EXTENSIONS.includes(ext)) {
+    if (markitdownBin && !PDF_EXTENSIONS.includes(ext) && !HTML_EXTENSIONS.includes(ext) && !XML_EXTENSIONS.includes(ext)) {
       try {
         const { stdout, stderr } = await execFileAsync(markitdownBin, [tempPath], { timeout: 120000, maxBuffer: 50 * 1024 * 1024, env: ENV });
         if (stdout || !stderr) {
@@ -1507,6 +1640,9 @@ export async function POST(request: NextRequest) {
       markdown = await convertHtmlToMarkdown(htmlContent);
       // Always post-process HTML locally
       markdown = postProcessHtmlMarkdown(markdown);
+    } else if (XML_EXTENSIONS.includes(ext)) {
+      const xmlContent = await readFile(tempPath, 'utf-8');
+      markdown = convertXmlToMarkdown(xmlContent);
     } else if (ext === '.csv') {
       markdown = convertCsvToMarkdown(await readFile(tempPath, 'utf-8'));
     } else if (ext === '.json') {
